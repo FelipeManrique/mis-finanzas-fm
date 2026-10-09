@@ -45,6 +45,7 @@
     catJar: DEFAULT_CAT_JAR(),
     jarInit: {},
     jarStart: monthOf(todayIso()) + '-01',
+    jarMoves: [],
     colchonMeses: 6,
     colchonManual: 0,
     gastoEstimado: 1700000 / 6,
@@ -447,13 +448,23 @@
     const pctJars = jars.filter((j) => !(j.fixed > 0));
     const pctTotal = pctJars.reduce((s, j) => s + (+j.pct || 0), 0) || 1;
     const st = {};
-    jars.forEach((j) => (st[j.id] = { bal: +(S().jarInit || {})[j.id] || 0, inM: 0, outM: 0 }));
+    jars.forEach((j) => { const ini = +(S().jarInit || {})[j.id] || 0; st[j.id] = { bal: ini, prev: ini, inM: 0, outM: 0, mvM: 0 }; });
     const start = S().jarStart || '0000';
-    const movs = db.movs.filter((m) => m.currency === 'ARS' && m.date >= start).slice()
+    const moves = (S().jarMoves || []).filter((x) => x.date >= start).map((x) => Object.assign({ kind: 'move' }, x));
+    const movs = db.movs.filter((m) => m.currency === 'ARS' && m.date >= start).concat(moves)
+      .filter((m) => monthOf(m.date) <= ym)
       .sort((a, b) => a.date.localeCompare(b.date) || (a.createdAt || 0) - (b.createdAt || 0));
     const fixedDone = new Set();
-    const put = (id, v, m) => { if (!st[id]) return; st[id].bal += v; if (monthOf(m.date) === ym) v >= 0 ? (st[id].inM += v) : (st[id].outM -= v); };
+    // saldo = anterior (inicial + meses previos) + entró este mes − usado este mes ± movido entre frascos
+    const put = (id, v, m, kind) => {
+      if (!st[id]) return;
+      st[id].bal += v;
+      if (monthOf(m.date) < ym) st[id].prev += v;
+      else if (kind === 'move') st[id].mvM += v;
+      else if (v >= 0) st[id].inM += v; else st[id].outM -= v;
+    };
     for (const m of movs) {
+      if (m.kind === 'move') { put(m.from, -m.amount, m, 'move'); put(m.to, m.amount, m, 'move'); continue; }
       if (m.type === 'ingreso' && m.split && Object.keys(m.split).length) {
         // reparto personalizado: cada frasco recibe su porcentaje de este ingreso
         const tot = Object.values(m.split).reduce((a, b) => a + (+b || 0), 0) || 100;
@@ -571,16 +582,25 @@
 
     // Frascos
     let html = `<h2 class="section-title" style="margin-top:8px">Mis frascos</h2><div class="jars">${jarsOf().map((j) => {
-      const s = js[j.id] || { bal: 0, inM: 0, outM: 0 };
-      const pct = s.inM ? Math.max(0, Math.min(1, (s.inM - s.outM) / s.inM)) : (s.bal > 0 ? 1 : 0);
+      const s = js[j.id] || { bal: 0, prev: 0, inM: 0, outM: 0, mvM: 0 };
+      const disp = s.prev + s.inM + Math.max(0, s.mvM);
+      const pct = disp > 0 ? Math.max(0, Math.min(1, s.bal / disp)) : 0;
       return `<button class="card jar" data-jar="${esc(j.id)}" style="--j:${esc(j.color)}">
         <div class="jar-top"><span class="jar-dot"></span><span class="jar-name">${esc(j.name)}</span><span class="jar-pct">${j.fixed > 0 ? money(+j.fixed) : (+j.pct || 0) + '%'}</span></div>
         <div class="jar-bal num ${s.bal < 0 ? 'neg' : ''}">${money(Math.round(s.bal))}</div>
         <div class="bar"><i style="width:${pct * 100}%;background:var(--j)"></i></div>
-        <div class="jar-sub num">Mes: <span style="color:var(--income)">+${money(Math.round(s.inM))}</span> · <span>−${money(Math.round(s.outM))}</span></div>
+        <div class="jar-calc num">
+          <span>Anterior</span><span>${money(Math.round(s.prev))}</span>
+          <span>Entró</span><span class="pos">+${money(Math.round(s.inM))}</span>
+          <span>Usado</span><span>−${money(Math.round(s.outM))}</span>
+          ${Math.round(s.mvM) ? `<span>Movido</span><span class="${s.mvM > 0 ? 'pos' : ''}">${money(Math.round(s.mvM), 'ARS', true)}</span>` : ''}
+        </div>
       </button>`;
     }).join('')}</div>
-      <p class="footnote">Cada cobro se reparte solo: primero los montos fijos (una vez por mes) y el resto por porcentaje. Los saldos se acumulan de un mes a otro.</p>`;
+      <button class="btn tinted" id="jar-move" style="margin-top:12px">Mover entre frascos</button>
+      <p class="footnote">Saldo = anterior (saldo inicial + lo que sobró de meses pasados) + lo que entró este mes − lo que usaste ± lo que moviste. La barra muestra cuánto queda de lo disponible.</p>`;
+    const gm = js.gastos;
+    if (gm && new Date().getDate() >= 24 && gm.bal > 1000) html += `<div class="banner">${ICON.warn}<div>Te sobran <strong>${money(Math.round(gm.bal))}</strong> en Gastos del mes. Podés dejarlos para el mes que viene o <button id="jar-move-gastos">moverlos a otro frasco</button>.</div></div>`;
     const div = js.diversion;
     if (div && new Date().getDate() >= 24 && div.bal > 0) html += `<div class="banner">${ICON.warn}<div>Te quedan <strong>${money(Math.round(div.bal))}</strong> en Diversión este mes. La idea del método es usarlos: date un gusto.</div></div>`;
 
@@ -659,6 +679,8 @@
     el.innerHTML = html;
     paneify(el);
     $$('[data-jar]', el).forEach((b) => (b.onclick = () => editJars()));
+    $('#jar-move').onclick = () => moveJars(null);
+    const mg = $('#jar-move-gastos'); if (mg) mg.onclick = () => moveJars('gastos');
     $('#meta-new').onclick = () => editMeta(null);
     $$('[data-meta]', el).forEach((b) => (b.onclick = () => editMeta((st.metas || []).find((x) => x.id === b.dataset.meta))));
     $$('[data-colchon]', el).forEach((b) => (b.onclick = editColchon));
@@ -730,6 +752,43 @@
         });
         st.jars = jars; st.jarInit = init; st.jarStart = $('#j-start').value || st.jarStart;
         save(); closeSheet(); renderAll(); toast('Frascos guardados');
+      }
+    });
+  }
+
+  function moveJars(from) {
+    const st = S(); st.jarMoves = st.jarMoves || [];
+    const js = jarsState(monthOf(todayIso()));
+    const opts = (sel) => jarsOf().map((j) => `<option value="${esc(j.id)}" ${j.id === sel ? 'selected' : ''}>${esc(j.name)} (${money(Math.round((js[j.id] || {}).bal || 0))})</option>`).join('');
+    const def = from || 'gastos';
+    const to = def === 'libertad' ? 'largo' : 'libertad';
+    const recent = st.jarMoves.slice().sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt).slice(0, 12);
+    openSheet({
+      title: 'Mover entre frascos', right: 'Mover',
+      render(body) {
+        body.innerHTML = `<p class="footnote" style="font-size:15px;color:var(--label);margin:0">Pasá plata de un frasco a otro, por ejemplo lo que te sobró de Gastos del mes a Libertad financiera. No cambia tus cuentas: sólo cómo está repartida.</p>
+          <div class="field-group">
+            <div class="field"><label for="mv-from">De</label><select id="mv-from">${opts(def)}</select></div>
+            <div class="field"><label for="mv-to">A</label><select id="mv-to">${opts(to)}</select></div>
+            <div class="field"><label for="mv-amt">Monto</label><input id="mv-amt" inputmode="decimal" placeholder="0" autocomplete="off"></div>
+            <div class="field"><label for="mv-note">Nota</label><input id="mv-note" placeholder="Opcional" autocomplete="off"></div>
+          </div>
+          <button class="link-btn" id="mv-all" style="justify-self:start;padding:0">Mover todo el saldo del frasco de origen</button>
+          ${recent.length ? `<p class="label-sm">Últimos movimientos</p><div class="list">${recent.map((x) => `<div class="item"><span class="grow">${esc(jarById(x.from).name)} → ${esc(jarById(x.to).name)}<span class="sub">${esc(dayLabel(x.date))}${x.note ? ' · ' + esc(x.note) : ''}</span></span><span class="val num">${money(Math.round(x.amount))}</span>
+            <button class="icon-btn mv-del" data-id="${esc(x.id)}" aria-label="Deshacer" style="width:28px;height:28px;color:var(--expense)">${ICON.close}</button></div>`).join('')}</div>` : ''}`;
+        $('#mv-all').onclick = () => { const b = (js[$('#mv-from').value] || {}).bal || 0; $('#mv-amt').value = amountInputValue(Math.max(0, Math.round(b))); };
+        $$('.mv-del', body).forEach((b) => (b.onclick = () => {
+          if (!b.classList.contains('armed')) { b.classList.add('armed'); b.style.background = 'var(--expense-fill)'; b.style.color = '#fff'; return; }
+          st.jarMoves = st.jarMoves.filter((x) => x.id !== b.dataset.id); save(); renderAll(); moveJars(from); toast('Movimiento deshecho');
+        }));
+      },
+      onRight() {
+        const a = $('#mv-from').value, b = $('#mv-to').value, amount = parseAmount($('#mv-amt').value);
+        if (a === b) { toast('Elegí dos frascos distintos'); return; }
+        if (!(amount > 0)) { toast('Poné cuánto querés mover'); $('#mv-amt').focus(); return; }
+        st.jarMoves.push({ id: uid(), date: todayIso(), from: a, to: b, amount, note: $('#mv-note').value.trim(), createdAt: Date.now() });
+        save(); closeSheet(); renderAll();
+        toast(`Moviste ${money(Math.round(amount))} a ${jarById(b).name}`);
       }
     });
   }
@@ -2151,7 +2210,7 @@
   }
 
   // ---------- Inicio ----------
-  const APP_VERSION = '1.4.1';
+  const APP_VERSION = '1.5.0';
   function init() {
     applyTheme();
     $$('.tab').forEach((t) => (t.onclick = () => go(t.dataset.tab)));
