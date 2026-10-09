@@ -47,7 +47,7 @@
     jarStart: monthOf(todayIso()) + '-01',
     colchonMeses: 6,
     colchonManual: 0,
-    gastoEstimado: 370000,
+    gastoEstimado: 200000,
     metas: [{ id: 'm-mudanza', nombre: 'Mudarme', monto: 0 }, { id: 'm-auto', nombre: 'Auto', monto: 0 }, { id: 'm-viaje', nombre: 'Viaje', monto: 0 }],
     holdings: [],
     cuotas: []
@@ -67,6 +67,7 @@
         ['gasto', 'ingreso'].forEach((t) => (settings.categories[t] || []).forEach((c) => { if (NEW[c.color]) c.color = NEW[c.color]; }));
         ['gasto', 'ingreso', 'inversion'].forEach((t) => { if (!Array.isArray(settings.categories[t])) settings.categories[t] = clone(Parser.DEFAULT_CATEGORIES[t]); });
         [['gasto', 'Resumen de tarjeta'], ['ingreso', 'Pensión']].forEach(([t, n]) => { if (!settings.categories[t].some((c) => c.name === n)) settings.categories[t].splice(Math.max(0, settings.categories[t].length - 1), 0, clone(Parser.DEFAULT_CATEGORIES[t].find((c) => c.name === n))); });
+        if (+settings.gastoEstimado === 370000 && !settings.gastoEstimadoEditado) settings.gastoEstimado = 200000;
         if (!settings.categories.gasto.some((c) => c.name === 'Donaciones')) settings.categories.gasto.splice(Math.max(0, settings.categories.gasto.length - 1), 0, clone(Parser.DEFAULT_CATEGORIES.gasto.find((c) => c.name === 'Donaciones')));
         return { movs: Array.isArray(d.movs) ? d.movs : [], settings };
       }
@@ -721,6 +722,7 @@
         st.colchonMeses = Math.max(1, parseInt($('#co-m').value, 10) || 6);
         st.colchonManual = parseAmount($('#co-x').value) || 0;
         st.gastoEstimado = parseAmount($('#co-e').value) || 0;
+        st.gastoEstimadoEditado = true;
         save(); closeSheet(); renderAll(); toast('Colchón actualizado');
       }
     });
@@ -2100,7 +2102,7 @@
   }
 
   // ---------- Inicio ----------
-  const APP_VERSION = '1.2.1';
+  const APP_VERSION = '1.2.2';
   function init() {
     applyTheme();
     $$('.tab').forEach((t) => (t.onclick = () => go(t.dataset.tab)));
