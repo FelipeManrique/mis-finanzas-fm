@@ -47,6 +47,7 @@
     jarStart: monthOf(todayIso()) + '-01',
     colchonMeses: 6,
     colchonManual: 0,
+    gastoEstimado: 370000,
     metas: [{ id: 'm-mudanza', nombre: 'Mudarme', monto: 0 }, { id: 'm-auto', nombre: 'Auto', monto: 0 }, { id: 'm-viaje', nombre: 'Viaje', monto: 0 }],
     holdings: [],
     cuotas: []
@@ -447,22 +448,27 @@
   }
 
   // Colchón: N meses del promedio de gastos de los últimos 3 meses completos (o el mes actual si no hay historia).
+  // Gasto mensual para el colchón: promedio real de los últimos 3 meses completos con gastos;
+  // si todavía no hay ningún mes completo, el gasto estimado de Ajustes (un mes a medias daría un colchón demasiado chico).
   function avgMonthlyGastos() {
     const vals = [];
+    const start = S().jarStart ? monthOf(S().jarStart) : '0000-00';
     for (let i = 1; i <= 3; i++) {
       const ym = shiftMonth(monthOf(todayIso()), -i);
+      if (ym < start) continue;
       const g = sum(movsOfMonth(ym).filter((m) => m.type === 'gasto' && m.currency === 'ARS'));
       if (g > 0) vals.push(g);
     }
-    if (!vals.length) vals.push(sum(movsOfMonth(monthOf(todayIso())).filter((m) => m.type === 'gasto' && m.currency === 'ARS')));
-    return vals.reduce((a, b) => a + b, 0) / vals.length;
+    if (vals.length) return { value: vals.reduce((a, b) => a + b, 0) / vals.length, real: true };
+    return { value: +S().gastoEstimado || 0, real: false };
   }
   function metasState(largoBal) {
     const meses = +S().colchonMeses || 6;
-    const avg = avgMonthlyGastos();
+    const g = avgMonthlyGastos();
+    const avg = g.value;
     const target = Math.round((+S().colchonManual || avg * meses) / 1000) * 1000;
     let avail = Math.max(0, largoBal);
-    const colchon = { nombre: `Colchón de emergencia (${meses} meses)`, monto: target, tiene: Math.min(avail, target), auto: !S().colchonManual, avg };
+    const colchon = { nombre: `Colchón de emergencia (${meses} meses)`, monto: target, tiene: Math.min(avail, target), auto: !S().colchonManual, avg, real: g.real };
     avail -= colchon.tiene;
     const metas = (S().metas || []).map((mt) => { const tiene = Math.min(avail, +mt.monto || 0); avail -= tiene; return Object.assign({}, mt, { tiene }); });
     return { colchon, metas, sobrante: avail, fase: colchon.monto > 0 && colchon.tiene < colchon.monto ? 1 : 2 };
@@ -558,11 +564,11 @@
       return `<button class="card meta" ${id ? `data-meta="${esc(id)}"` : 'data-colchon="1"'}>
         <div class="bt-top"><span class="meta-name">${esc(nombre)}</span><span class="num"><strong>${Math.round(p * 100)}%</strong></span></div>
         <div class="bar ${p >= 1 ? 'done' : ''}"><i style="width:${p * 100}%"></i></div>
-        <div class="meta-sub num">${monto ? `${money(Math.round(tiene))} de ${money(Math.round(monto))}${extra ? ' · ' + extra : ''}` : 'Tocá para definir el monto'}</div></button>`;
+        <div class="meta-sub num">${monto ? `${money(Math.round(tiene))} de ${money(Math.round(monto))}${extra ? ' · ' + extra : ''}` : 'Tocá para definir el objetivo'}</div></button>`;
     };
     html += `<h2 class="section-title">Mis metas</h2>
       <p class="footnote" style="margin:-4px 6px 10px">Se llenan en orden con el frasco de ahorro a largo plazo. ${ms.fase === 1 ? '<strong>Fase 1:</strong> primero el colchón.' : '<strong>Fase 2:</strong> colchón completo, ahora tus metas.'}</p>
-      <div class="metas">${metaCard(ms.colchon.nombre, ms.colchon.monto, ms.colchon.tiene, ms.colchon.auto ? `promedio de gastos ${money(Math.round(ms.colchon.avg))}/mes` : 'monto fijado a mano')}
+      <div class="metas">${metaCard(ms.colchon.nombre, ms.colchon.monto, ms.colchon.tiene, ms.colchon.auto ? (ms.colchon.real ? `tu promedio de gastos: ${money(Math.round(ms.colchon.avg))}/mes` : `gasto estimado ${money(Math.round(ms.colchon.avg))}/mes, hasta tener un mes completo`) : 'monto fijado a mano')}
       ${ms.metas.map((mt) => metaCard(mt.nombre, +mt.monto || 0, mt.tiene, mt.plazo ? 'para ' + esc(cap(monthName(monthOf(mt.plazo)))) : '', mt.id)).join('')}</div>
       <button class="btn tinted" id="meta-new" style="margin-top:12px">Nueva meta</button>`;
 
@@ -699,20 +705,22 @@
 
   function editColchon() {
     const st = S();
-    const avg = avgMonthlyGastos();
+    const g = avgMonthlyGastos();
     openSheet({
       title: 'Colchón de emergencia', right: 'Guardar',
       render(body) {
         body.innerHTML = `<p class="footnote" style="font-size:15px;color:var(--label);margin:0">Plata siempre disponible para imprevistos, que no se invierte en nada que pueda bajar. Se mide en meses de tus gastos.</p>
           <div class="field-group">
             <div class="field"><label for="co-m">Meses</label><input id="co-m" inputmode="numeric" value="${+st.colchonMeses || 6}"></div>
+            <div class="field"><label for="co-e">Gasto mensual estimado</label><input id="co-e" inputmode="decimal" placeholder="0" value="${esc(amountInputValue(+st.gastoEstimado || ''))}"></div>
             <div class="field"><label for="co-x">Monto a mano</label><input id="co-x" inputmode="decimal" placeholder="automático" value="${esc(amountInputValue(+st.colchonManual || ''))}"></div>
           </div>
-          <p class="footnote" style="margin-top:-8px">Automático: tus gastos promedio (${money(Math.round(avg))} por mes, últimos 3 meses) × meses. Dejá "monto a mano" vacío para usarlo.</p>`;
+          <p class="footnote" style="margin-top:-8px">${g.real ? `Automático: tu promedio real de gastos (${money(Math.round(g.value))} por mes, últimos meses completos) × meses.` : 'Automático: mientras no tengas un mes completo de gastos cargado, usa el gasto mensual estimado × meses. Después pasa sola a tu promedio real.'} Dejá "monto a mano" vacío para usar el automático.</p>`;
       },
       onRight() {
         st.colchonMeses = Math.max(1, parseInt($('#co-m').value, 10) || 6);
         st.colchonManual = parseAmount($('#co-x').value) || 0;
+        st.gastoEstimado = parseAmount($('#co-e').value) || 0;
         save(); closeSheet(); renderAll(); toast('Colchón actualizado');
       }
     });
@@ -2092,7 +2100,7 @@
   }
 
   // ---------- Inicio ----------
-  const APP_VERSION = '1.2.0';
+  const APP_VERSION = '1.2.1';
   function init() {
     applyTheme();
     $$('.tab').forEach((t) => (t.onclick = () => go(t.dataset.tab)));
