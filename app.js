@@ -84,6 +84,9 @@
         }
         settings.categories.gasto.forEach((c) => { if (c.name === 'Comida' && c.color === '#FF9F0A') c.color = '#C69214'; });
         (settings.jars || []).forEach((j) => { if (j.id === 'libertad' && +j.pct === 18.5 && !settings.jarsPct100) j.pct = 20; });
+        // Dar pasa de $10.000 fijos a "lo que des en el mes" (pedido de Felipe)
+        (settings.jars || []).forEach((j) => { if (j.id === 'dar' && +j.fixed === 10000 && !settings.darActual) { delete j.fixed; j.actual = true; j.hint = 'Recibe exactamente lo que donás o regalás en el mes'; } });
+        settings.darActual = true;
         settings.jarsPct100 = true;
         if (!settings.categories.gasto.some((c) => c.name === 'Donaciones')) settings.categories.gasto.splice(Math.max(0, settings.categories.gasto.length - 1), 0, clone(Parser.DEFAULT_CATEGORIES.gasto.find((c) => c.name === 'Donaciones')));
         return { movs: Array.isArray(d.movs) ? d.movs : [], settings };
@@ -433,7 +436,7 @@
     { id: 'diversion', name: 'Diversión', pct: 10, color: '#FF8D28', hint: 'Salidas, cenas y gustos. Se gasta sin culpa' },
     { id: 'largo', name: 'Ahorro a largo plazo', pct: 25, color: '#00C8B3', hint: 'Primero el colchón; después mudanza, auto y viaje' },
     { id: 'libertad', name: 'Libertad financiera', pct: 20, color: '#6155F5', hint: 'Inversión: no se toca' },
-    { id: 'dar', name: 'Dar', fixed: 10000, color: '#FF2D55', hint: 'Donaciones y regalos' }
+    { id: 'dar', name: 'Dar', actual: true, color: '#FF2D55', hint: 'Recibe exactamente lo que donás o regalás en el mes' }
   ]; }
   function DEFAULT_CAT_JAR() { return { 'Salidas': 'diversion', 'Ocio': 'diversion', 'Ropa': 'diversion', 'Educación': 'largo', 'Donaciones': 'dar', 'Regalos': 'dar' }; }
   const jarsOf = () => S().jars || [];
@@ -447,7 +450,7 @@
 
   function jarsState(ym) {
     const jars = jarsOf();
-    const pctJars = jars.filter((j) => !(j.fixed > 0));
+    const pctJars = jars.filter((j) => !(j.fixed > 0) && !j.actual);
     const pctTotal = pctJars.reduce((s, j) => s + (+j.pct || 0), 0) || 1;
     const st = {};
     jars.forEach((j) => { const ini = +(S().jarInit || {})[j.id] || 0; st[j.id] = { bal: ini, prev: ini, inM: 0, outM: 0, mvM: 0 }; });
@@ -456,7 +459,6 @@
     const movs = db.movs.filter((m) => m.currency === 'ARS' && m.date >= start).concat(moves)
       .filter((m) => monthOf(m.date) <= ym)
       .sort((a, b) => a.date.localeCompare(b.date) || (a.createdAt || 0) - (b.createdAt || 0));
-    const fixedDone = new Set();
     // saldo = anterior (inicial + meses previos) + entró este mes − usado este mes ± movido entre frascos
     const put = (id, v, m, kind) => {
       if (!st[id]) return;
@@ -465,19 +467,37 @@
       else if (kind === 'move') st[id].mvM += v;
       else if (v >= 0) st[id].inM += v; else st[id].outM -= v;
     };
+    // Por mes: ingresos con reparto normal y lo que se descuenta antes de los porcentajes
+    // (montos fijos + frascos "según lo que des", que reciben exactamente lo gastado en el mes).
+    const monthInfo = {};
+    const info = (mo) => monthInfo[mo] || (monthInfo[mo] = { ing: 0, actual: {} });
+    const actualJars = jars.filter((j) => j.actual);
+    const fixedJars = jars.filter((j) => !j.actual && j.fixed > 0);
+    for (const m of movs) {
+      if (m.kind === 'move') continue;
+      if (m.type === 'ingreso' && !(m.split && Object.keys(m.split).length)) info(monthOf(m.date)).ing += m.amount;
+      else if (m.type !== 'ingreso') { const id = jarOfMov(m); const j = actualJars.find((x) => x.id === id); if (j) { const inf = info(monthOf(m.date)); inf.actual[id] = (inf.actual[id] || 0) + m.amount; } }
+    }
+    const firstFor = (mo) => {
+      const inf = info(mo);
+      if (inf.deduct) return inf.deduct;
+      const want = fixedJars.map((j) => [j.id, +j.fixed || 0]).concat(actualJars.map((j) => [j.id, inf.actual[j.id] || 0]));
+      let left = inf.ing; const ded = {};
+      want.forEach(([id, v]) => { const d = Math.min(v, Math.max(0, left)); ded[id] = d; left -= d; });
+      inf.deduct = ded; inf.base = Math.max(0, left);
+      return ded;
+    };
     for (const m of movs) {
       if (m.kind === 'move') { put(m.from, -m.amount, m, 'move'); put(m.to, m.amount, m, 'move'); continue; }
       if (m.type === 'ingreso' && m.split && Object.keys(m.split).length) {
         // reparto personalizado: cada frasco recibe su porcentaje de este ingreso
-        const tot = Object.values(m.split).reduce((a, b) => a + (+b || 0), 0) || 100;
+        const tot = Object.values(m.split).reduce((a2, b2) => a2 + (+b2 || 0), 0) || 100;
         Object.entries(m.split).forEach(([id, p]) => put(id, m.amount * (+p || 0) / tot, m));
       } else if (m.type === 'ingreso') {
-        let rest = m.amount;
-        const mo = monthOf(m.date);
-        if (!fixedDone.has(mo)) {
-          fixedDone.add(mo);
-          jars.filter((j) => j.fixed > 0).forEach((j) => { const f = Math.min(+j.fixed, rest); put(j.id, f, m); rest -= f; });
-        }
+        const mo = monthOf(m.date), inf = info(mo), ded = firstFor(mo);
+        const share = inf.ing ? m.amount / inf.ing : 0;
+        Object.entries(ded).forEach(([id, v]) => put(id, v * share, m));
+        const rest = inf.base * share;
         pctJars.forEach((j) => put(j.id, rest * (+j.pct || 0) / pctTotal, m));
       } else {
         const id = jarOfMov(m);
@@ -588,7 +608,7 @@
       const disp = s.prev + s.inM + Math.max(0, s.mvM);
       const pct = disp > 0 ? Math.max(0, Math.min(1, s.bal / disp)) : 0;
       return `<button class="card jar" data-jar="${esc(j.id)}" style="--j:${esc(j.color)}">
-        <div class="jar-top"><span class="jar-dot"></span><span class="jar-name">${esc(j.name)}</span><span class="jar-pct">${j.fixed > 0 ? money(+j.fixed) : (+j.pct || 0) + '%'}</span></div>
+        <div class="jar-top"><span class="jar-dot"></span><span class="jar-name">${esc(j.name)}</span><span class="jar-pct">${j.actual ? 'lo que des' : j.fixed > 0 ? money(+j.fixed) : String(+j.pct || 0).replace('.', ',') + '%'}</span></div>
         <div class="jar-bal num ${s.bal < 0 ? 'neg' : ''}">${money(Math.round(s.bal))}</div>
         <div class="bar"><i style="width:${pct * 100}%;background:var(--j)"></i></div>
         <div class="jar-calc num">
@@ -600,7 +620,7 @@
       </button>`;
     }).join('')}</div>
       <button class="btn tinted" id="jar-move" style="margin-top:12px">Mover entre frascos</button>
-      <p class="footnote">Cada cobro: primero los montos fijos (una vez por mes); el resto es el 100% y se reparte con tus porcentajes. Saldo = anterior (saldo inicial + lo que sobró de meses pasados) + lo que entró este mes − lo que usaste ± lo que moviste.</p>`;
+      <p class="footnote">De lo que cobrás en el mes, Dar recibe exactamente lo que donaste; el resto es el 100% y se reparte con tus porcentajes. Saldo = anterior (saldo inicial + lo que sobró de meses pasados) + lo que entró este mes − lo que usaste ± lo que moviste.</p>`;
     const gm = js.gastos;
     if (gm && new Date().getDate() >= 24 && gm.bal > 1000) html += `<div class="banner">${ICON.warn}<div>Te sobran <strong>${money(Math.round(gm.bal))}</strong> en Gastos del mes. Podés dejarlos para el mes que viene o <button id="jar-move-gastos">moverlos a otro frasco</button>.</div></div>`;
     const div = js.diversion;
@@ -710,15 +730,15 @@
     openSheet({
       title: 'Mis frascos', right: 'Guardar',
       render(body) {
-        body.innerHTML = `<p class="footnote" style="font-size:15px;color:var(--label);margin:0">Primero se separan los montos fijos (una vez por mes, del primer cobro). Lo que queda es el 100%, y sobre eso se aplican los porcentajes: tienen que sumar 100%.</p>
+        body.innerHTML = `<p class="footnote" style="font-size:15px;color:var(--label);margin:0">De lo que cobrás en el mes, primero se separa lo que va a los frascos "lo que gaste en el mes" (por ejemplo Dar recibe exactamente lo que donaste) y los montos fijos. Lo que queda es el 100%, y sobre eso se aplican los porcentajes: tienen que sumar 100%.</p>
           ${jars.map((j, i) => `<div class="field-group jar-ed" style="--j:${esc(j.color)}">
             <button type="button" class="jar-ed-head" aria-expanded="false" aria-controls="j-b${i}"><span class="jar-dot"></span><span class="grow"><span id="j-h${i}">${esc(j.name)}</span><small class="jar-ed-ini num" id="j-ini${i}">${+(st.jarInit || {})[j.id] ? 'Saldo inicial ' + money(+st.jarInit[j.id]) : ''}</small></span>
-              <span class="jar-ed-sum num" id="j-s${i}">${j.fixed > 0 ? money(+j.fixed) : String(+j.pct || 0).replace('.', ',') + '%'}</span>
+              <span class="jar-ed-sum num" id="j-s${i}">${j.actual ? 'lo que des' : j.fixed > 0 ? money(+j.fixed) : String(+j.pct || 0).replace('.', ',') + '%'}</span>
               <svg class="jar-ed-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
             <div class="jar-ed-body" id="j-b${i}" hidden>
             <div class="field"><label for="j-n${i}">Nombre</label><input id="j-n${i}" value="${esc(j.name)}"></div>
-            <div class="field"><label for="j-t${i}">Tipo</label><select id="j-t${i}"><option value="pct" ${j.fixed > 0 ? '' : 'selected'}>Porcentaje</option><option value="fixed" ${j.fixed > 0 ? 'selected' : ''}>Monto fijo por mes</option></select></div>
-            <div class="field"><label for="j-v${i}">Valor</label><input id="j-v${i}" inputmode="decimal" value="${esc(j.fixed > 0 ? amountInputValue(+j.fixed) : String(+j.pct || 0).replace('.', ','))}"></div>
+            <div class="field"><label for="j-t${i}">Tipo</label><select id="j-t${i}"><option value="pct" ${j.fixed > 0 || j.actual ? '' : 'selected'}>Porcentaje</option><option value="fixed" ${j.fixed > 0 && !j.actual ? 'selected' : ''}>Monto fijo por mes</option><option value="actual" ${j.actual ? 'selected' : ''}>Lo que gaste en el mes</option></select></div>
+            <div class="field"><label for="j-v${i}">Valor</label><input id="j-v${i}" inputmode="decimal" value="${esc(j.actual ? '' : j.fixed > 0 ? amountInputValue(+j.fixed) : String(+j.pct || 0).replace('.', ','))}"></div>
             <div class="field"><label for="j-i${i}">Saldo inicial</label><input id="j-i${i}" inputmode="decimal" placeholder="0" value="${esc(amountInputValue(+(st.jarInit || {})[j.id] || ''))}"></div>
             </div>
           </div>`).join('')}
@@ -733,9 +753,10 @@
         }));
         const upd = () => {
           jars.forEach((_, i) => {
-            const fixed = $('#j-t' + i).value === 'fixed', v = $('#j-v' + i).value || '0', ini = parseAmount($('#j-i' + i).value);
+            const tt = $('#j-t' + i).value, fixed = tt === 'fixed', v = $('#j-v' + i).value || '0', ini = parseAmount($('#j-i' + i).value);
+            $('#j-v' + i).closest('.field').hidden = tt === 'actual';
             $('#j-h' + i).textContent = $('#j-n' + i).value || jars[i].name;
-            $('#j-s' + i).textContent = fixed ? money(parseAmount(v) || 0) : String(parseFloat(v.replace(',', '.')) || 0).replace('.', ',') + '%';
+            $('#j-s' + i).textContent = tt === 'actual' ? 'lo que des' : fixed ? money(parseAmount(v) || 0) : String(parseFloat(v.replace(',', '.')) || 0).replace('.', ',') + '%';
             $('#j-ini' + i).textContent = ini ? 'Saldo inicial ' + money(ini) : '';
           });
           let t = 0; jars.forEach((_, i) => { if ($('#j-t' + i).value === 'pct') t += parseFloat(($('#j-v' + i).value || '0').replace(',', '.')) || 0; });
@@ -753,7 +774,10 @@
         jars.forEach((j, i) => {
           j.name = $('#j-n' + i).value.trim() || j.name;
           const v = $('#j-v' + i).value;
-          if ($('#j-t' + i).value === 'fixed') { j.fixed = parseAmount(v) || 0; delete j.pct; } else { j.pct = parseFloat((v || '0').replace(',', '.')) || 0; delete j.fixed; }
+          const tt = $('#j-t' + i).value;
+          if (tt === 'actual') { j.actual = true; delete j.fixed; delete j.pct; }
+          else if (tt === 'fixed') { j.fixed = parseAmount(v) || 0; delete j.pct; delete j.actual; }
+          else { j.pct = parseFloat((v || '0').replace(',', '.')) || 0; delete j.fixed; delete j.actual; }
           const iv = parseAmount($('#j-i' + i).value); if (iv) init[j.id] = iv;
         });
         st.jars = jars; st.jarInit = init; st.jarStart = $('#j-start').value || st.jarStart;
@@ -946,7 +970,7 @@
       render(body) {
         body.innerHTML = `<div class="guide">
           <p class="guide-lead">Cada vez que cobrás, repartís todo en frascos con un propósito, y gastás de cada uno sólo para lo que es.</p>
-          ${jarsOf().map((j) => `<div class="guide-block" style="--g:${esc(j.color)}"><div class="guide-head"><span class="guide-pct num">${j.fixed > 0 ? '$' : (+j.pct || 0) + '%'}</span><span><strong>${esc(j.name)}</strong><span class="guide-amt">${j.fixed > 0 ? money(+j.fixed) + ' fijos por mes' : 'de cada cobro'}</span></span></div><p>${esc(j.hint || '')}</p></div>`).join('')}
+          ${jarsOf().map((j) => `<div class="guide-block" style="--g:${esc(j.color)}"><div class="guide-head"><span class="guide-pct num">${j.actual ? '=' : j.fixed > 0 ? '$' : String(+j.pct || 0).replace('.', ',') + '%'}</span><span><strong>${esc(j.name)}</strong><span class="guide-amt">${j.actual ? 'lo que des en el mes' : j.fixed > 0 ? money(+j.fixed) + ' fijos por mes' : 'de lo que queda'}</span></span></div><p>${esc(j.hint || '')}</p></div>`).join('')}
           <div class="card guide-def">
             <p><b>Libertad financiera no se toca:</b> sólo se invierte, y lo que rinde se reinvierte.</p>
             <p><b>Diversión se gasta todos los meses:</b> es lo que hace sostenible el método.</p>
@@ -1006,7 +1030,7 @@
       <h2 class="section-title">Método: 6 frascos</h2>
       <div class="list">
         <button class="item" id="set-guide"><span class="grow">Cómo funcionan los frascos<span class="sub">Qué va a cada uno y las reglas del método</span></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m9 5 7 7-7 7"/></svg></button>
-        <button class="item" id="set-jars"><span class="grow">Frascos y porcentajes<span class="sub">${esc(jarsOf().map((j) => j.fixed > 0 ? money(+j.fixed) : (+j.pct || 0) + '%').join(' · '))}</span></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m9 5 7 7-7 7"/></svg></button>
+        <button class="item" id="set-jars"><span class="grow">Frascos y porcentajes<span class="sub">${esc(jarsOf().map((j) => j.actual ? 'Dar: lo que des' : j.fixed > 0 ? money(+j.fixed) : String(+j.pct || 0).replace('.', ',') + '%').join(' · '))}</span></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m9 5 7 7-7 7"/></svg></button>
         <button class="item" id="set-catjar"><span class="grow">Qué va a cada frasco<span class="sub">Categoría de gasto → frasco</span></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m9 5 7 7-7 7"/></svg></button>
         <button class="item" id="set-colchon"><span class="grow">Colchón de emergencia<span class="sub">${+st.colchonMeses || 6} meses de gastos</span></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m9 5 7 7-7 7"/></svg></button>
       </div>
@@ -2216,7 +2240,7 @@
   }
 
   // ---------- Inicio ----------
-  const APP_VERSION = '1.5.1';
+  const APP_VERSION = '1.6.0';
   function init() {
     applyTheme();
     $$('.tab').forEach((t) => (t.onclick = () => go(t.dataset.tab)));
