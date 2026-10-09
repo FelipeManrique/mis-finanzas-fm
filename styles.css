@@ -348,7 +348,8 @@ button.item:active, a.item:active { background: var(--fill); }
 .sheet-head .txt-btn { border: 0; background: none; color: var(--accent-ink); font-size: 17px; padding: 8px 4px; justify-self: start; }
 .sheet-head .txt-btn.strong { font-weight: 600; justify-self: end; }
 .sheet-head .txt-btn:disabled { color: var(--label-3); }
-.sheet-body { overflow-y: auto; padding: 4px 16px calc(env(safe-area-inset-bottom, 0px) + 24px); -webkit-overflow-scrolling: touch; display: grid; gap: 16px; overscroll-behavior: contain; }
+.sheet-body { overflow-y: auto; padding: 4px 16px calc(env(safe-area-inset-bottom, 0px) + 24px); -webkit-overflow-scrolling: touch; display: grid; gap: 16px; overscroll-behavior: contain;
+  grid-auto-rows: max-content; align-content: start; } /* las tarjetas no se achican: si no entra, se desplaza */
 /* dentro de la hoja: tarjetas translúcidas sin blur propio (un vidrio no refracta a través de otro) */
 .sheet .card, .sheet .group, .sheet .banner, .sheet .warn-list, .sheet .welcome-points, .sheet .field-group,
 .sheet .said, .sheet .review-card, .sheet .text-entry textarea, .sheet .list, .sheet .cat-chips button, .sheet .examples button {
@@ -601,3 +602,16 @@ button.item:active, a.item:active { background: var(--fill); }
 @media (min-width: 1200px) {
   .movs-layout { grid-template-columns: 420px minmax(0, 1fr); }
 }
+
+/* editor de frascos: resumen con flechita para desplegar */
+.jar-ed-head { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; padding: 0 16px; border: 0; background: none; text-align: left; font-size: 17px; color: var(--label); }
+.jar-ed-head .grow { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jar-ed-sum { color: var(--label-2); font-size: 15px; white-space: nowrap; }
+.jar-ed-chev { width: 18px; height: 18px; color: var(--label-3); flex: none; transition: transform .25s var(--ease); }
+.jar-ed-head[aria-expanded="true"] .jar-ed-chev { transform: rotate(180deg); }
+.jar-ed-body { border-top: .5px solid var(--separator); }
+.jar-ed-body .field:first-child::before { display: none; }
+.jar-ed-head .grow { display: grid; gap: 1px; white-space: normal; }
+.jar-ed-head .grow > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jar-ed-ini { font-size: 13px; font-weight: 400; color: var(--label-2); }
+.jar-ed-ini:empty { display: none; }

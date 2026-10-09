@@ -687,20 +687,37 @@
       title: 'Mis frascos', right: 'Guardar',
       render(body) {
         body.innerHTML = `<p class="footnote" style="font-size:15px;color:var(--label);margin:0">Porcentaje de cada cobro, o un monto fijo por mes (se descuenta del primer cobro del mes). Los porcentajes se reparten sobre lo que queda.</p>
-          ${jars.map((j, i) => `<div class="field-group" style="--j:${esc(j.color)}">
-            <div class="field"><label for="j-n${i}"><span class="jar-dot" style="display:inline-block;margin-right:8px"></span>Nombre</label><input id="j-n${i}" value="${esc(j.name)}"></div>
+          ${jars.map((j, i) => `<div class="field-group jar-ed" style="--j:${esc(j.color)}">
+            <button type="button" class="jar-ed-head" aria-expanded="false" aria-controls="j-b${i}"><span class="jar-dot"></span><span class="grow"><span id="j-h${i}">${esc(j.name)}</span><small class="jar-ed-ini num" id="j-ini${i}">${+(st.jarInit || {})[j.id] ? 'Saldo inicial ' + money(+st.jarInit[j.id]) : ''}</small></span>
+              <span class="jar-ed-sum num" id="j-s${i}">${j.fixed > 0 ? money(+j.fixed) : String(+j.pct || 0).replace('.', ',') + '%'}</span>
+              <svg class="jar-ed-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+            <div class="jar-ed-body" id="j-b${i}" hidden>
+            <div class="field"><label for="j-n${i}">Nombre</label><input id="j-n${i}" value="${esc(j.name)}"></div>
             <div class="field"><label for="j-t${i}">Tipo</label><select id="j-t${i}"><option value="pct" ${j.fixed > 0 ? '' : 'selected'}>Porcentaje</option><option value="fixed" ${j.fixed > 0 ? 'selected' : ''}>Monto fijo por mes</option></select></div>
             <div class="field"><label for="j-v${i}">Valor</label><input id="j-v${i}" inputmode="decimal" value="${esc(j.fixed > 0 ? amountInputValue(+j.fixed) : String(+j.pct || 0).replace('.', ','))}"></div>
             <div class="field"><label for="j-i${i}">Saldo inicial</label><input id="j-i${i}" inputmode="decimal" placeholder="0" value="${esc(amountInputValue(+(st.jarInit || {})[j.id] || ''))}"></div>
+            </div>
           </div>`).join('')}
           <div class="field-group"><div class="field"><label for="j-start">Contar desde</label><input id="j-start" type="date" value="${esc(st.jarStart || '')}"></div></div>
           <p class="footnote" style="margin-top:-8px">Los cobros anteriores a esa fecha no se reparten. Usá "saldo inicial" para lo que ya tenés, por ejemplo tus ahorros en Ahorro a largo plazo.</p>
           <div class="said"><span>Suma de porcentajes</span><strong class="num" id="j-sum" style="color:var(--label)"></strong></div>`;
+        // desplegar / plegar cada frasco
+        $$('.jar-ed-head', body).forEach((h) => (h.onclick = () => {
+          const b = $('#' + h.getAttribute('aria-controls'));
+          const open = b.hidden;
+          b.hidden = !open; h.setAttribute('aria-expanded', String(open));
+        }));
         const upd = () => {
+          jars.forEach((_, i) => {
+            const fixed = $('#j-t' + i).value === 'fixed', v = $('#j-v' + i).value || '0', ini = parseAmount($('#j-i' + i).value);
+            $('#j-h' + i).textContent = $('#j-n' + i).value || jars[i].name;
+            $('#j-s' + i).textContent = fixed ? money(parseAmount(v) || 0) : String(parseFloat(v.replace(',', '.')) || 0).replace('.', ',') + '%';
+            $('#j-ini' + i).textContent = ini ? 'Saldo inicial ' + money(ini) : '';
+          });
           let t = 0; jars.forEach((_, i) => { if ($('#j-t' + i).value === 'pct') t += parseFloat(($('#j-v' + i).value || '0').replace(',', '.')) || 0; });
           $('#j-sum').textContent = String(Math.round(t * 10) / 10).replace('.', ',') + '%' + (Math.abs(t - 100) > 0.05 ? ' (se reparte en proporción)' : '');
         };
-        jars.forEach((_, i) => { $('#j-v' + i).oninput = upd; $('#j-t' + i).onchange = upd; });
+        jars.forEach((_, i) => { $('#j-v' + i).oninput = upd; $('#j-t' + i).onchange = upd; $('#j-n' + i).oninput = upd; $('#j-i' + i).oninput = upd; });
         upd();
       },
       onRight() {
@@ -2134,7 +2151,7 @@
   }
 
   // ---------- Inicio ----------
-  const APP_VERSION = '1.4.0';
+  const APP_VERSION = '1.4.1';
   function init() {
     applyTheme();
     $$('.tab').forEach((t) => (t.onclick = () => go(t.dataset.tab)));
