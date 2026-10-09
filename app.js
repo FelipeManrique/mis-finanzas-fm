@@ -109,13 +109,16 @@
   const S = () => db.settings;
 
   // ---------- Formato ----------
+  // Números: punto decimal y un espacio fino entre miles (34 861.8), como en el teclado del teléfono.
   const fmtCache = {};
+  function fmtNum(v, max = 2, min = 0) {
+    const k = max + ':' + min;
+    if (!fmtCache[k]) fmtCache[k] = new Intl.NumberFormat('en-US', { minimumFractionDigits: min, maximumFractionDigits: max });
+    return fmtCache[k].format(v).replace(/,/g, '\u2060\u2005\u2060'); // espacio angosto (¼ em) que no corta línea
+  }
+  const CUR_SIGN = { ARS: '$', USD: 'US$', EUR: '€' };
   function money(v, cur = 'ARS', signed = false) {
-    const k = cur + (v % 1 ? 'd' : 'i');
-    if (!fmtCache[k]) {
-      fmtCache[k] = new Intl.NumberFormat('es-AR', { style: 'currency', currency: cur, minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 });
-    }
-    const s = fmtCache[k].format(Math.abs(v)).replace(/ /g, ' ').replace('US$', 'US$ ').replace('  ', ' ');
+    const s = (CUR_SIGN[cur] || cur) + ' ' + fmtNum(Math.abs(v), 2, v % 1 ? 2 : 0);
     if (signed && v) return (v < 0 ? '−' : '+') + s;
     return v < 0 ? '−' + s : s;
   }
@@ -133,23 +136,25 @@
     return d.toLocaleDateString('es-AR', opts).replace(/[.,]/g, '');
   }
   function shiftMonth(ym, n) { const d = parseIso(ym + '-01'); d.setMonth(d.getMonth() + n); return monthOf(isoDate(d)); }
+  // Lo que se escribe a mano: el punto (o la coma) es decimal; los espacios separan miles.
   function parseAmount(s) {
     if (typeof s === 'number') return s;
     s = String(s || '').replace(/[^\d.,]/g, '');
     if (!s) return NaN;
-    const v = Parser.parseDigits(s);
+    if (s.includes('.') && s.includes(',')) { const v = Parser.parseDigits(s); return v === null ? NaN : v; } // pegado tipo 1.234,56
+    const parts = s.split(s.includes(',') ? ',' : '.');
+    return parseFloat(parts.length > 2 ? parts.join('') : parts.join('.'));
+  }
+  // Planillas importadas: 1.500 = mil quinientos
+  function parseLoose(s) {
+    s = String(s || '').replace(/[^\d.,]/g, '');
+    const v = s ? Parser.parseDigits(s) : null;
     return v === null ? NaN : v;
   }
-  // Cantidades (BTC, acciones): un solo punto es decimal ("0.0025"); con coma, la coma es el decimal.
-  function parseQty(s) {
-    s = String(s || '').replace(/[^\d.,]/g, '');
-    if (!s) return NaN;
-    if (s.includes(',')) return parseFloat(s.replace(/\./g, '').replace(',', '.'));
-    return parseFloat((s.match(/\./g) || []).length > 1 ? s.replace(/\./g, '') : s);
-  }
+  const parseQty = parseAmount;
   function amountInputValue(v) {
     if (!v && v !== 0) return '';
-    return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(v);
+    return fmtNum(v).replace(/\u2060/g, ''); // en los campos, sin caracteres invisibles que traben el borrado
   }
 
   function catInfo(type, name) {
@@ -405,8 +410,8 @@
     return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;
   }
   function shortMoney(v) {
-    if (v >= 1e6) return '$' + (v / 1e6).toLocaleString('es-AR', { maximumFractionDigits: 1 }) + ' M';
-    if (v >= 1e3) return '$' + (v / 1e3).toLocaleString('es-AR', { maximumFractionDigits: 0 }) + ' mil';
+    if (v >= 1e6) return '$' + fmtNum(v / 1e6, 1) + ' M';
+    if (v >= 1e3) return '$' + fmtNum(v / 1e3, 0) + ' mil';
     return '$' + v;
   }
   function barChart() {
@@ -620,7 +625,7 @@
       const disp = Math.max(0, s.prev) + s.inM + Math.max(0, s.mvM);
       const pct = disp > 0 ? Math.max(0, Math.min(1, mes / disp)) : 0;
       return `<button class="card jar" data-jar="${esc(j.id)}" style="--j:${esc(j.color)}">
-        <div class="jar-top"><span class="jar-dot"></span><span class="jar-name">${esc(j.name)}</span><span class="jar-pct">${j.actual ? 'lo que des' : j.fixed > 0 ? money(+j.fixed) : String(+j.pct || 0).replace('.', ',') + '%'}</span></div>
+        <div class="jar-top"><span class="jar-dot"></span><span class="jar-name">${esc(j.name)}</span><span class="jar-pct">${j.actual ? 'lo que des' : j.fixed > 0 ? money(+j.fixed) : String(+j.pct || 0) + '%'}</span></div>
         <div class="jar-bal num ${mes < 0 ? 'neg' : ''}">${money(Math.round(mes))}</div>
         <div class="bar"><i style="width:${pct * 100}%;background:var(--j)"></i></div>
         <div class="jar-calc num">
@@ -673,7 +678,7 @@
         ${completo && tot ? `<div class="guide-bar" style="margin-top:10px"><i style="flex:${fija || 0.0001};background:#00C8B3"></i><i style="flex:${vari || 0.0001};background:#6155F5"></i></div>
         <div class="legend"><span><i style="background:#00C8B3"></i>Renta fija ${Math.round((fija / tot) * 100)}%</span><span><i style="background:#6155F5"></i>Renta variable ${Math.round((vari / tot) * 100)}%</span></div>` : ''}
       </div>
-      <div class="list" style="margin-top:12px">${hs.map((x) => `<button class="item" data-hold="${esc(x.h.id)}"><span class="grow">${esc(x.h.nombre)}<span class="sub num">${x.clase === 'fija' ? 'Renta fija' : 'Renta variable'}${x.h.tipo !== 'manual' ? ` · ${(+x.qty).toLocaleString('es-AR', { maximumFractionDigits: 8 })} ${esc((x.h.simbolo || '').toUpperCase())}` : ''}${x.res !== null ? ` · <span style="color:${x.res >= 0 ? 'var(--income)' : 'var(--expense)'}">${money(Math.round(x.res), 'ARS', true)}</span>` : ''}</span></span>
+      <div class="list" style="margin-top:12px">${hs.map((x) => `<button class="item" data-hold="${esc(x.h.id)}"><span class="grow">${esc(x.h.nombre)}<span class="sub num">${x.clase === 'fija' ? 'Renta fija' : 'Renta variable'}${x.h.tipo !== 'manual' ? ` · ${fmtNum(+x.qty, 8)} ${esc((x.h.simbolo || '').toUpperCase())}` : ''}${x.res !== null ? ` · <span style="color:${x.res >= 0 ? 'var(--income)' : 'var(--expense)'}">${money(Math.round(x.res), 'ARS', true)}</span>` : ''}</span></span>
         <span class="val num" style="color:var(--label)">${x.ars !== null ? money(Math.round(x.ars)) : (pricesLoading ? '…' : 'sin precio')}</span>${chev}</button>`).join('')}</div>
       <div class="btn-row" style="margin-top:12px"><button class="btn tinted" id="hold-new">Agregar activo</button><button class="btn tinted" id="prices-now" ${pricesLoading ? 'disabled' : ''}>${pricesLoading ? 'Actualizando…' : 'Actualizar precios'}</button></div>
       <p class="footnote">${prices.at ? 'Precios de referencia del ' + esc(new Date(prices.at).toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) + ' (Yahoo Finance, CoinGecko, dolarapi). ' : ''}La app sólo muestra tus tenencias; no es asesoramiento financiero.</p>`;
@@ -745,12 +750,12 @@
         body.innerHTML = `<p class="footnote" style="font-size:15px;color:var(--label);margin:0">De lo que cobrás en el mes, primero se separa lo que va a los frascos "lo que gaste en el mes" (por ejemplo Dar recibe exactamente lo que donaste) y los montos fijos. Lo que queda es el 100%, y sobre eso se aplican los porcentajes: tienen que sumar 100%.</p>
           ${jars.map((j, i) => `<div class="field-group jar-ed" style="--j:${esc(j.color)}">
             <button type="button" class="jar-ed-head" aria-expanded="false" aria-controls="j-b${i}"><span class="jar-dot"></span><span class="grow"><span id="j-h${i}">${esc(j.name)}</span><small class="jar-ed-ini num" id="j-ini${i}">${+(st.jarInit || {})[j.id] ? 'Saldo inicial ' + money(+st.jarInit[j.id]) : ''}</small></span>
-              <span class="jar-ed-sum num" id="j-s${i}">${j.actual ? 'lo que des' : j.fixed > 0 ? money(+j.fixed) : String(+j.pct || 0).replace('.', ',') + '%'}</span>
+              <span class="jar-ed-sum num" id="j-s${i}">${j.actual ? 'lo que des' : j.fixed > 0 ? money(+j.fixed) : String(+j.pct || 0) + '%'}</span>
               <svg class="jar-ed-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
             <div class="jar-ed-body" id="j-b${i}" hidden>
             <div class="field"><label for="j-n${i}">Nombre</label><input id="j-n${i}" value="${esc(j.name)}"></div>
             <div class="field"><label for="j-t${i}">Tipo</label><select id="j-t${i}"><option value="pct" ${j.fixed > 0 || j.actual ? '' : 'selected'}>Porcentaje</option><option value="fixed" ${j.fixed > 0 && !j.actual ? 'selected' : ''}>Monto fijo por mes</option><option value="actual" ${j.actual ? 'selected' : ''}>Lo que gaste en el mes</option></select></div>
-            <div class="field"><label for="j-v${i}">Valor</label><input id="j-v${i}" inputmode="decimal" value="${esc(j.actual ? '' : j.fixed > 0 ? amountInputValue(+j.fixed) : String(+j.pct || 0).replace('.', ','))}"></div>
+            <div class="field"><label for="j-v${i}">Valor</label><input id="j-v${i}" inputmode="decimal" value="${esc(j.actual ? '' : j.fixed > 0 ? amountInputValue(+j.fixed) : String(+j.pct || 0))}"></div>
             <div class="field"><label for="j-i${i}">Saldo inicial</label><input id="j-i${i}" inputmode="decimal" placeholder="0" value="${esc(amountInputValue(+(st.jarInit || {})[j.id] || ''))}"></div>
             </div>
           </div>`).join('')}
@@ -768,12 +773,12 @@
             const tt = $('#j-t' + i).value, fixed = tt === 'fixed', v = $('#j-v' + i).value || '0', ini = parseAmount($('#j-i' + i).value);
             $('#j-v' + i).closest('.field').hidden = tt === 'actual';
             $('#j-h' + i).textContent = $('#j-n' + i).value || jars[i].name;
-            $('#j-s' + i).textContent = tt === 'actual' ? 'lo que des' : fixed ? money(parseAmount(v) || 0) : String(parseFloat(v.replace(',', '.')) || 0).replace('.', ',') + '%';
+            $('#j-s' + i).textContent = tt === 'actual' ? 'lo que des' : fixed ? money(parseAmount(v) || 0) : String(parseFloat(v.replace(',', '.')) || 0) + '%';
             $('#j-ini' + i).textContent = ini ? 'Saldo inicial ' + money(ini) : '';
           });
           let t = 0; jars.forEach((_, i) => { if ($('#j-t' + i).value === 'pct') t += parseFloat(($('#j-v' + i).value || '0').replace(',', '.')) || 0; });
           const ok = Math.abs(t - 100) <= 0.05;
-          $('#j-sum').textContent = String(Math.round(t * 10) / 10).replace('.', ',') + '%' + (ok ? ' ✓' : t < 100 ? ` · falta ${String(Math.round((100 - t) * 10) / 10).replace('.', ',')}%` : ` · sobra ${String(Math.round((t - 100) * 10) / 10).replace('.', ',')}%`);
+          $('#j-sum').textContent = String(Math.round(t * 10) / 10) + '%' + (ok ? ' ✓' : t < 100 ? ` · falta ${String(Math.round((100 - t) * 10) / 10)}%` : ` · sobra ${String(Math.round((t - 100) * 10) / 10)}%`);
           $('#j-sum').style.color = ok ? 'var(--income)' : 'var(--warn)';
         };
         jars.forEach((_, i) => { $('#j-v' + i).oninput = upd; $('#j-t' + i).onchange = upd; $('#j-n' + i).oninput = upd; $('#j-i' + i).oninput = upd; });
@@ -781,7 +786,7 @@
       },
       onRight() {
         let tot = 0; jars.forEach((_, i) => { if ($('#j-t' + i).value === 'pct') tot += parseFloat(($('#j-v' + i).value || '0').replace(',', '.')) || 0; });
-        if (Math.abs(tot - 100) > 0.05) { toast(`Los porcentajes tienen que sumar 100% (van ${String(Math.round(tot * 10) / 10).replace('.', ',')}%)`); return; }
+        if (Math.abs(tot - 100) > 0.05) { toast(`Los porcentajes tienen que sumar 100% (van ${String(Math.round(tot * 10) / 10)}%)`); return; }
         const init = {};
         jars.forEach((j, i) => {
           j.name = $('#j-n' + i).value.trim() || j.name;
@@ -919,7 +924,7 @@
               <div class="field"><label for="h-t">Tipo</label><select id="h-t">${Object.entries(HOLD_TYPES).map(([k, v]) => `<option value="${k}" ${x.tipo === k ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</select></div>
               <div class="field"><label for="h-n">Nombre</label><input id="h-n" value="${esc(x.nombre)}" placeholder="${manual ? 'Ej: Plazo fijo Galicia' : 'Ej: Bitcoin'}" autocomplete="off"></div>
               ${manual ? '' : `<div class="field"><label for="h-s">Símbolo</label><input id="h-s" value="${esc(x.simbolo)}" placeholder="${esc(HOLD_TYPES[x.tipo].hint)}" autocapitalize="characters" autocomplete="off"></div>
-              <div class="field"><label for="h-q">Cantidad que tenés</label><input id="h-q" inputmode="decimal" placeholder="0" value="${x.cantidad ? String(x.cantidad).replace('.', ',') : ''}"></div>`}
+              <div class="field"><label for="h-q">Cantidad que tenés</label><input id="h-q" inputmode="decimal" placeholder="0" value="${x.cantidad ? String(x.cantidad) : ''}"></div>`}
               ${manual ? `<div class="field"><label for="h-v">Valor actual</label><input id="h-v" inputmode="decimal" placeholder="0" value="${esc(amountInputValue(+x.valorManual || ''))}"></div>` : ''}
               <div class="field"><label for="h-a">Lo que pusiste</label><input id="h-a" inputmode="decimal" placeholder="0" value="${esc(amountInputValue(+x.aporteInicial || ''))}"></div>
               <div class="field"><label for="h-c">Clase</label><select id="h-c"><option value="variable" ${(x.clase || HOLD_TYPES[x.tipo].clase) === 'variable' ? 'selected' : ''}>Renta variable</option><option value="fija" ${(x.clase || HOLD_TYPES[x.tipo].clase) === 'fija' ? 'selected' : ''}>Renta fija</option></select></div>
@@ -982,7 +987,7 @@
       render(body) {
         body.innerHTML = `<div class="guide">
           <p class="guide-lead">Cada vez que cobrás, repartís todo en frascos con un propósito, y gastás de cada uno sólo para lo que es.</p>
-          ${jarsOf().map((j) => `<div class="guide-block" style="--g:${esc(j.color)}"><div class="guide-head"><span class="guide-pct num">${j.actual ? '=' : j.fixed > 0 ? '$' : String(+j.pct || 0).replace('.', ',') + '%'}</span><span><strong>${esc(j.name)}</strong><span class="guide-amt">${j.actual ? 'lo que des en el mes' : j.fixed > 0 ? money(+j.fixed) + ' fijos por mes' : 'de lo que queda'}</span></span></div><p>${esc(j.hint || '')}</p></div>`).join('')}
+          ${jarsOf().map((j) => `<div class="guide-block" style="--g:${esc(j.color)}"><div class="guide-head"><span class="guide-pct num">${j.actual ? '=' : j.fixed > 0 ? '$' : String(+j.pct || 0) + '%'}</span><span><strong>${esc(j.name)}</strong><span class="guide-amt">${j.actual ? 'lo que des en el mes' : j.fixed > 0 ? money(+j.fixed) + ' fijos por mes' : 'de lo que queda'}</span></span></div><p>${esc(j.hint || '')}</p></div>`).join('')}
           <div class="card guide-def">
             <p><b>Libertad financiera no se toca:</b> sólo se invierte, y lo que rinde se reinvierte.</p>
             <p><b>Diversión se gasta todos los meses:</b> es lo que hace sostenible el método.</p>
@@ -1042,7 +1047,7 @@
       <h2 class="section-title">Método: 6 frascos</h2>
       <div class="list">
         <button class="item" id="set-guide"><span class="grow">Cómo funcionan los frascos<span class="sub">Qué va a cada uno y las reglas del método</span></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m9 5 7 7-7 7"/></svg></button>
-        <button class="item" id="set-jars"><span class="grow">Frascos y porcentajes<span class="sub">${esc(jarsOf().map((j) => j.actual ? 'Dar: lo que des' : j.fixed > 0 ? money(+j.fixed) : String(+j.pct || 0).replace('.', ',') + '%').join(' · '))}</span></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m9 5 7 7-7 7"/></svg></button>
+        <button class="item" id="set-jars"><span class="grow">Frascos y porcentajes<span class="sub">${esc(jarsOf().map((j) => j.actual ? 'Dar: lo que des' : j.fixed > 0 ? money(+j.fixed) : String(+j.pct || 0) + '%').join(' · '))}</span></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m9 5 7 7-7 7"/></svg></button>
         <button class="item" id="set-catjar"><span class="grow">Qué va a cada frasco<span class="sub">Categoría de gasto → frasco</span></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m9 5 7 7-7 7"/></svg></button>
         <button class="item" id="set-colchon"><span class="grow">Colchón de emergencia<span class="sub">${+st.colchonMeses || 6} meses de gastos</span></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m9 5 7 7-7 7"/></svg></button>
       </div>
@@ -1224,12 +1229,12 @@
         </div>`;
     }
     if (m.type === 'inversion') return sel('hold', 'Activo', [['', 'Sin asignar']].concat((S().holdings || []).map((h) => [h.id, h.nombre])), m.holdingId || '') +
-      `<div class="field"><label for="${prefix}qty">Cantidad comprada</label><input id="${prefix}qty" inputmode="decimal" placeholder="opcional" value="${m.cantidad ? String(m.cantidad).replace('.', ',') : ''}"></div>`;
+      `<div class="field"><label for="${prefix}qty">Cantidad comprada</label><input id="${prefix}qty" inputmode="decimal" placeholder="opcional" value="${m.cantidad ? String(m.cantidad) : ''}"></div>`;
     return '';
   }
   function splitRow(id, p) {
     return `<div class="field sp-row"><select class="sp-jar" aria-label="Frasco">${jarsOf().map((j) => `<option value="${esc(j.id)}" ${j.id === id ? 'selected' : ''}>${esc(j.name)}</option>`).join('')}</select>
-      <input class="sp-pct" inputmode="decimal" placeholder="%" aria-label="Porcentaje" value="${p !== '' && p != null ? String(p).replace('.', ',') : ''}"><span class="sp-pc">%</span>
+      <input class="sp-pct" inputmode="decimal" placeholder="%" aria-label="Porcentaje" value="${p !== '' && p != null ? String(p) : ''}"><span class="sp-pc">%</span>
       <button type="button" class="icon-btn sp-rm" aria-label="Quitar" style="width:28px;height:28px;color:var(--label-2)">${ICON.close}</button></div>`;
   }
   function splitTotal(box) {
@@ -1240,7 +1245,7 @@
   function paintSplit(box) {
     const t = splitTotal(box), el = $('.sp-total', box);
     if (!el) return;
-    el.textContent = t === 100 ? 'Total 100% ✓' : t < 100 ? `Total ${String(t).replace('.', ',')}% · falta ${String(Math.round((100 - t) * 100) / 100).replace('.', ',')}%` : `Total ${String(t).replace('.', ',')}% · sobra ${String(Math.round((t - 100) * 100) / 100).replace('.', ',')}%`;
+    el.textContent = t === 100 ? 'Total 100% ✓' : t < 100 ? `Total ${String(t)}% · falta ${String(Math.round((100 - t) * 100) / 100)}%` : `Total ${String(t)}% · sobra ${String(Math.round((t - 100) * 100) / 100)}%`;
     el.style.color = t === 100 ? 'var(--income)' : 'var(--warn)';
   }
   function movFields(m, prefix) {
@@ -1322,7 +1327,7 @@
         const amount = parseAmount($('#e-amt').value);
         if (!(amount > 0)) { $('#e-amt').focus(); toast('Ingresá un monto mayor a cero'); return; }
         const f = readFields('e-', $('#sheet-body'));
-        if (f.split && f.splitTotal !== 100) { toast(`El reparto personalizado tiene que sumar 100% (va ${String(f.splitTotal).replace('.', ',')}%)`); return; }
+        if (f.split && f.splitTotal !== 100) { toast(`El reparto personalizado tiene que sumar 100% (va ${String(f.splitTotal)}%)`); return; }
         delete f.splitTotal;
         const rec = Object.assign(m, f, { amount });
         if (!rec.description) rec.description = rec.category;
@@ -1630,7 +1635,7 @@
       let date = r[iF].trim();
       const dm = date.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
       if (dm) date = `${dm[3].length === 2 ? '20' + dm[3] : dm[3]}-${pad(dm[2])}-${pad(dm[1])}`;
-      let amount = parseAmount(r[iM]);
+      let amount = parseLoose(r[iM]);
       let type = iT >= 0 && /ingreso/i.test(r[iT]) ? 'ingreso' : iT >= 0 && /inversi/i.test(r[iT]) ? 'inversion' : 'gasto';
       if (/^-/.test(r[iM].trim()) && iT < 0) type = 'gasto';
       const g = (n) => (col(n) >= 0 ? (r[col(n)] || '').trim() : '');
@@ -2115,7 +2120,7 @@
     const rm = Array.isArray(remote.movs) ? remote.movs : [];
     const apply = (movs, settings, msg) => {
       db = { movs, settings: Object.assign(DEFAULT_SETTINGS(), settings || db.settings) };
-      try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { /* sin espacio */ }
+      try { localStorage.setItem(KEY, JSON.stringify(db)); db = load(); } catch (e) { /* sin espacio */ }
       drive.lastCount = rm.length;
       applyTheme(); closeSheet(); go('movs'); toast(msg);
       scheduleSync(300);
@@ -2252,7 +2257,7 @@
   }
 
   // ---------- Inicio ----------
-  const APP_VERSION = '1.7.2';
+  const APP_VERSION = '1.8.0';
   function init() {
     applyTheme();
     $$('.tab').forEach((t) => (t.onclick = () => go(t.dataset.tab)));
