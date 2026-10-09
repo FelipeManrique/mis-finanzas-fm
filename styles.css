@@ -620,3 +620,9 @@ button.item:active, a.item:active { background: var(--fill); }
 .jar-calc { display: grid; grid-template-columns: auto 1fr; gap: 1px 8px; font-size: 12.5px; color: var(--label-2); line-height: 1.35; }
 .jar-calc span:nth-child(even) { text-align: right; color: var(--label); }
 .jar-calc .pos { color: var(--income) !important; }
+.jar-calc .acc { padding-top: 4px; margin-top: 3px; border-top: .5px solid var(--separator); color: var(--label-2) !important; }
+.jar-calc .acc.neg { color: var(--expense) !important; }
+.jar-calc span:nth-child(even) { white-space: nowrap; }
+.jar-acc { display: flex; justify-content: space-between; gap: 8px; padding-top: 5px; border-top: .5px solid var(--separator); font-size: 12.5px; color: var(--label-2); }
+.jar-acc span:last-child { white-space: nowrap; }
+.jar-acc .neg { color: var(--expense); }
