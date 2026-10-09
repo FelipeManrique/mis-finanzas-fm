@@ -81,6 +81,7 @@
             m.category = Parser.detectCategory(t, 'gasto', { gasto: [def('Salidas'), def('Comida')] }) === 'Salidas' ? 'Salidas' : 'Comida';
           });
         }
+        settings.categories.gasto.forEach((c) => { if (c.name === 'Comida' && c.color === '#FF9F0A') c.color = '#C69214'; });
         if (!settings.categories.gasto.some((c) => c.name === 'Donaciones')) settings.categories.gasto.splice(Math.max(0, settings.categories.gasto.length - 1), 0, clone(Parser.DEFAULT_CATEGORIES.gasto.find((c) => c.name === 'Donaciones')));
         return { movs: Array.isArray(d.movs) ? d.movs : [], settings };
       }
@@ -199,6 +200,17 @@
   }
   const movsOfMonth = (ym) => db.movs.filter((m) => monthOf(m.date) === ym);
   const sortMovs = (arr) => arr.sort((a, b) => (b.date.localeCompare(a.date)) || (b.createdAt || 0) - (a.createdAt || 0));
+
+  // Agrupa cada título de sección con lo que sigue hasta el próximo título (para el diseño en columnas de pantallas grandes).
+  function paneify(el) {
+    const kids = Array.from(el.children);
+    let pane = null, i = 0;
+    for (const k of kids) {
+      if (k.matches('h2.section-title')) { pane = document.createElement('section'); pane.className = 'pane pane-' + (i++); el.insertBefore(pane, k); }
+      else if (!pane) { pane = document.createElement('section'); pane.className = 'pane pane-lead'; el.insertBefore(pane, k); }
+      pane.appendChild(k);
+    }
+  }
 
   // ---------- Render: selector de mes ----------
   function renderMonthSwitch() {
@@ -369,6 +381,7 @@
       <div class="legend"><span><i style="background:var(--income-fill)"></i>Ingresos</span><span><i style="background:var(--expense-fill)"></i>Gastos</span></div></div>
       <p class="footnote">Montos en pesos. Los movimientos en dólares se muestran aparte en el resumen.</p>`;
     el.innerHTML = html;
+    paneify(el);
     $$('.catbar', el).forEach((b) => (b.onclick = () => { ui.cat = b.dataset.cat; ui.type = b.dataset.type; ui.q = ''; $('#q').value = ''; go('movs'); }));
   }
 
@@ -593,14 +606,17 @@
     const fija = valued.filter((x) => x.clase === 'fija').reduce((s, x) => s + x.ars, 0);
     const vari = tot - fija;
     const aport = hs.reduce((s, x) => s + x.aportes, 0);
+    const sinPrecio = hs.filter((x) => x.ars === null);
+    const completo = !sinPrecio.length;
     html += `<h2 class="section-title">Mi cartera</h2>`;
     if (hs.length) {
       html += `<div class="card cartera">
         <div class="caption">Valor total</div>
-        <div class="balance num">${money(Math.round(tot))}</div>
-        ${mep() ? `<div class="usd-line num">≈ ${money(Math.round(tot / mep()), 'USD')} al dólar MEP ${money(Math.round(mep()))}</div>` : ''}
-        ${aport ? `<div class="usd-line num">Aportado ${money(Math.round(aport))} · resultado <strong style="color:${tot - aport >= 0 ? 'var(--income)' : 'var(--expense)'}">${money(Math.round(tot - aport), 'ARS', true)}</strong></div>` : ''}
-        ${tot ? `<div class="guide-bar" style="margin-top:10px"><i style="flex:${fija || 0.0001};background:#00C8B3"></i><i style="flex:${vari || 0.0001};background:#6155F5"></i></div>
+        <div class="balance num">${completo ? money(Math.round(tot)) : pricesLoading ? 'Actualizando…' : money(Math.round(tot))}</div>
+        ${!completo && !pricesLoading ? `<div class="usd-line">Sin precio: ${esc(sinPrecio.map((x) => x.h.nombre).join(', '))}. El total no los incluye.</div>` : ''}
+        ${completo && mep() ? `<div class="usd-line num">≈ ${money(Math.round(tot / mep()), 'USD')} al dólar MEP ${money(Math.round(mep()))}</div>` : ''}
+        ${completo && aport ? `<div class="usd-line num">Aportado ${money(Math.round(aport))} · resultado <strong style="color:${tot - aport >= 0 ? 'var(--income)' : 'var(--expense)'}">${money(Math.round(tot - aport), 'ARS', true)}</strong></div>` : ''}
+        ${completo && tot ? `<div class="guide-bar" style="margin-top:10px"><i style="flex:${fija || 0.0001};background:#00C8B3"></i><i style="flex:${vari || 0.0001};background:#6155F5"></i></div>
         <div class="legend"><span><i style="background:#00C8B3"></i>Renta fija ${Math.round((fija / tot) * 100)}%</span><span><i style="background:#6155F5"></i>Renta variable ${Math.round((vari / tot) * 100)}%</span></div>` : ''}
       </div>
       <div class="list" style="margin-top:12px">${hs.map((x) => `<button class="item" data-hold="${esc(x.h.id)}"><span class="grow">${esc(x.h.nombre)}<span class="sub num">${x.clase === 'fija' ? 'Renta fija' : 'Renta variable'}${x.h.tipo !== 'manual' ? ` · ${(+x.qty).toLocaleString('es-AR', { maximumFractionDigits: 8 })} ${esc((x.h.simbolo || '').toUpperCase())}` : ''}${x.res !== null ? ` · <span style="color:${x.res >= 0 ? 'var(--income)' : 'var(--expense)'}">${money(Math.round(x.res), 'ARS', true)}</span>` : ''}</span></span>
@@ -641,6 +657,7 @@
       <p class="footnote">Saldo por medio de pago: saldo inicial + ingresos − gastos e inversiones hechos con ese medio.</p>`;
 
     el.innerHTML = html;
+    paneify(el);
     $$('[data-jar]', el).forEach((b) => (b.onclick = () => editJars()));
     $('#meta-new').onclick = () => editMeta(null);
     $$('[data-meta]', el).forEach((b) => (b.onclick = () => editMeta((st.metas || []).find((x) => x.id === b.dataset.meta))));
@@ -935,6 +952,7 @@
       <div class="list"><div class="item"><span class="grow">Mis Finanzas FM<span class="sub" id="set-ver">Versión ${APP_VERSION}</span></span>
         <button class="btn tinted small" id="set-update">Buscar actualización</button></div></div>
       <p class="footnote" style="text-align:center;margin-top:24px">© 2026 Felipe Manrique. Todos los derechos reservados.<br><a href="privacidad.html" target="_blank" rel="noopener" style="color:var(--accent)">Privacidad y condiciones</a></p>`;
+    paneify(el);
 
     $('#set-lang').onchange = (e) => { st.lang = e.target.value; save(); };
     $('#set-auto').onchange = (e) => { st.autoSave = e.target.checked; save(); };
@@ -2116,7 +2134,7 @@
   }
 
   // ---------- Inicio ----------
-  const APP_VERSION = '1.3.0';
+  const APP_VERSION = '1.4.0';
   function init() {
     applyTheme();
     $$('.tab').forEach((t) => (t.onclick = () => go(t.dataset.tab)));
