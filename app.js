@@ -1152,7 +1152,8 @@
     root.setProperty('--glass-tint', String(Math.min(1, Math.max(0, S().glass ?? 0.35))));
     root.setProperty('--ui-zoom', S().bigText ? '1.15' : '1');
     const meta = document.querySelectorAll('meta[name="theme-color"]');
-    meta.forEach((m) => m.setAttribute('content', /dark/.test(m.media) ? '#05070F' : '#EEF3FA'));
+    // la barra de estado toma el mismo color que el borde de arriba del fondo (también con tema forzado)
+    meta.forEach((m) => m.setAttribute('content', (t === 'auto' ? /dark/.test(m.media) : t === 'dark') ? '#05070F' : '#EEF3FA'));
   }
 
   // ---------- Categorías ----------
@@ -2300,7 +2301,7 @@
   }
 
   // ---------- Inicio ----------
-  const APP_VERSION = '1.9.0';
+  const APP_VERSION = '1.9.1';
   function init() {
     applyTheme();
     $$('.tab').forEach((t) => (t.onclick = () => go(t.dataset.tab)));

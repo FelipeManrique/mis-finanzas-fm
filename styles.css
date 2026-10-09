@@ -113,6 +113,14 @@ body::before {
     radial-gradient(40% 30% at 10% 88%, var(--aurora-4), transparent 70%),
     var(--bg);
 }
+/* debajo de la barra de estado: la aurora se funde suave con el color de la barra (sin corte recto) */
+body::after {
+  content: ""; position: fixed; inset: 0 0 auto 0; z-index: -1; pointer-events: none;
+  height: calc(env(safe-area-inset-top, 0px) + 120px);
+  background: linear-gradient(to bottom, var(--bg) 0%,
+    color-mix(in srgb, var(--bg) 82%, transparent) 18%, color-mix(in srgb, var(--bg) 55%, transparent) 42%,
+    color-mix(in srgb, var(--bg) 25%, transparent) 68%, color-mix(in srgb, var(--bg) 7%, transparent) 88%, transparent 100%);
+}
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 [hidden] { display: none !important; }
