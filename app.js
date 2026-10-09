@@ -157,6 +157,7 @@
     body.innerHTML = '';
     body.scrollTop = 0;
     render(body);
+    $$('.split-box', body).forEach(paintSplit);
     if (sh.hidden) {
       sh.hidden = false; sc.hidden = false;
       requestAnimationFrame(() => requestAnimationFrame(() => { sh.classList.add('open'); sc.classList.add('open'); }));
@@ -256,7 +257,7 @@
     const c = catInfo(m.type, m.category);
     const hold = m.type === 'inversion' && m.holdingId ? (S().holdings || []).find((x) => x.id === m.holdingId) : null;
     const jar = m.type === 'gasto' ? jarById(jarOfMov(m)) : null;
-    const sub = [m.category, m.type === 'ingreso' && m.direct ? `${String(m.direct.pct).replace('.', ',')}% a ${jarById(m.direct.jar).name}` : null, jar ? jar.name : null, hold ? hold.nombre : null, m.method, m.installments ? m.installments + ' cuotas' : null].filter(Boolean).join(' · ');
+    const sub = [m.category, m.type === 'ingreso' && m.split ? 'Reparto personalizado' : null, jar ? jar.name : null, hold ? hold.nombre : null, m.method, m.installments ? m.installments + ' cuotas' : null].filter(Boolean).join(' · ');
     return `<button class="row" data-id="${esc(m.id)}">
       <span class="badge" style="--c:${esc(c.color)}" aria-hidden="true">${esc((m.category || '?').charAt(0).toUpperCase())}</span>
       <span class="mid"><span class="t">${esc(m.description || m.category)}</span>
@@ -425,13 +426,12 @@
     const fixedDone = new Set();
     const put = (id, v, m) => { if (!st[id]) return; st[id].bal += v; if (monthOf(m.date) === ym) v >= 0 ? (st[id].inM += v) : (st[id].outM -= v); };
     for (const m of movs) {
-      if (m.type === 'ingreso') {
+      if (m.type === 'ingreso' && m.split && Object.keys(m.split).length) {
+        // reparto personalizado: cada frasco recibe su porcentaje de este ingreso
+        const tot = Object.values(m.split).reduce((a, b) => a + (+b || 0), 0) || 100;
+        Object.entries(m.split).forEach(([id, p]) => put(id, m.amount * (+p || 0) / tot, m));
+      } else if (m.type === 'ingreso') {
         let rest = m.amount;
-        // una parte directo a un frasco (ej. 75% a libertad financiera); el resto se reparte como cualquier cobro
-        if (m.direct && m.direct.jar && st[m.direct.jar] && +m.direct.pct > 0) {
-          const d = m.amount * Math.min(100, +m.direct.pct) / 100;
-          put(m.direct.jar, d, m); rest -= d;
-        }
         const mo = monthOf(m.date);
         if (!fixedDone.has(mo)) {
           fixedDone.add(mo);
@@ -1055,16 +1055,33 @@
     const sel = (id, label, opts, val) => `<div class="field"><label for="${prefix}${id}">${label}</label><select id="${prefix}${id}">${opts.map(([k, v]) => `<option value="${esc(k)}" ${k === val ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select></div>`;
     if (m.type === 'gasto') return sel('jar', 'Frasco', jarsOf().map((j) => [j.id, j.name]), jarOfMov(m));
     if (m.type === 'ingreso') {
-      const on = !!(m.direct && +m.direct.pct > 0);
-      return sel('split', 'Reparto', [['normal', 'Normal (mis frascos)'], ['direct', 'Una parte directo a un frasco']], on ? 'direct' : 'normal') +
-        `<div class="split-box" id="${prefix}splitbox" ${on ? '' : 'hidden'}>
-          <div class="field"><label for="${prefix}dpct">Porcentaje</label><input id="${prefix}dpct" inputmode="decimal" placeholder="Ej: 75" value="${on ? String(m.direct.pct).replace('.', ',') : ''}"></div>
-          ${sel('djar', 'Va a', jarsOf().map((j) => [j.id, j.name]), on ? m.direct.jar : 'libertad')}
-          <p class="footnote" style="margin:0 16px 10px">Ese porcentaje va entero a ese frasco; el resto del cobro se reparte como siempre.</p></div>`;
+      const rows = m.split && Object.keys(m.split).length ? Object.entries(m.split) : [['libertad', ''], ['largo', '']];
+      const on = !!(m.split && Object.keys(m.split).length);
+      return sel('split', 'Reparto', [['normal', 'Normal (mis frascos)'], ['custom', 'Personalizado']], on ? 'custom' : 'normal') +
+        `<div class="split-box" id="${prefix}splitbox" data-prefix="${prefix}" ${on ? '' : 'hidden'}>
+          <div class="sp-rows">${rows.map(([id, p]) => splitRow(id, p)).join('')}</div>
+          <div class="sp-foot"><button type="button" class="link-btn sp-add">+ Agregar frasco</button><span class="sp-total num"></span></div>
+        </div>`;
     }
     if (m.type === 'inversion') return sel('hold', 'Activo', [['', 'Sin asignar']].concat((S().holdings || []).map((h) => [h.id, h.nombre])), m.holdingId || '') +
       `<div class="field"><label for="${prefix}qty">Cantidad comprada</label><input id="${prefix}qty" inputmode="decimal" placeholder="opcional" value="${m.cantidad ? String(m.cantidad).replace('.', ',') : ''}"></div>`;
     return '';
+  }
+  function splitRow(id, p) {
+    return `<div class="field sp-row"><select class="sp-jar" aria-label="Frasco">${jarsOf().map((j) => `<option value="${esc(j.id)}" ${j.id === id ? 'selected' : ''}>${esc(j.name)}</option>`).join('')}</select>
+      <input class="sp-pct" inputmode="decimal" placeholder="%" aria-label="Porcentaje" value="${p !== '' && p != null ? String(p).replace('.', ',') : ''}"><span class="sp-pc">%</span>
+      <button type="button" class="icon-btn sp-rm" aria-label="Quitar" style="width:28px;height:28px;color:var(--label-2)">${ICON.close}</button></div>`;
+  }
+  function splitTotal(box) {
+    let t = 0;
+    $$('.sp-pct', box).forEach((i) => (t += parseFloat((i.value || '0').replace(',', '.')) || 0));
+    return Math.round(t * 100) / 100;
+  }
+  function paintSplit(box) {
+    const t = splitTotal(box), el = $('.sp-total', box);
+    if (!el) return;
+    el.textContent = t === 100 ? 'Total 100% ✓' : t < 100 ? `Total ${String(t).replace('.', ',')}% · falta ${String(Math.round((100 - t) * 100) / 100).replace('.', ',')}%` : `Total ${String(t).replace('.', ',')}% · sobra ${String(Math.round((t - 100) * 100) / 100).replace('.', ',')}%`;
+    el.style.color = t === 100 ? 'var(--income)' : 'var(--warn)';
   }
   function movFields(m, prefix) {
     const st = S();
@@ -1083,9 +1100,14 @@
     const inst = parseInt(v('inst'), 10);
     const out = { description: v('desc').trim(), category: v('cat'), method: v('method'), date: v('date') || todayIso(), installments: inst > 1 ? inst : null };
     if (opt('split') !== undefined) {
-      out.direct = null;
-      const pct = parseFloat((opt('dpct') || '').replace(',', '.'));
-      if (opt('split') === 'direct' && pct > 0) out.direct = { jar: opt('djar'), pct: Math.min(100, pct) };
+      out.split = null;
+      const box = $('#' + prefix + 'splitbox', root);
+      if (opt('split') === 'custom' && box) {
+        const sp = {};
+        $$('.sp-row', box).forEach((r) => { const v = parseFloat(($('.sp-pct', r).value || '').replace(',', '.')); if (v > 0) sp[$('.sp-jar', r).value] = (sp[$('.sp-jar', r).value] || 0) + v; });
+        out.split = sp;
+        out.splitTotal = splitTotal(box);
+      }
     }
     if (opt('jar') !== undefined) { const def = (S().catJar || {})[out.category] || 'gastos'; out.jar = opt('jar') !== def ? opt('jar') : null; }
     if (opt('hold') !== undefined) { out.holdingId = opt('hold') || null; const q = (opt('qty') || '').trim(); out.cantidad = q ? parseFloat(q.replace(/\./g, '').replace(',', '.')) || parseFloat(q) || null : null; }
@@ -1140,6 +1162,8 @@
         const amount = parseAmount($('#e-amt').value);
         if (!(amount > 0)) { $('#e-amt').focus(); toast('Ingresá un monto mayor a cero'); return; }
         const f = readFields('e-', $('#sheet-body'));
+        if (f.split && f.splitTotal !== 100) { toast(`El reparto personalizado tiene que sumar 100% (va ${String(f.splitTotal).replace('.', ',')}%)`); return; }
+        delete f.splitTotal;
         const rec = Object.assign(m, f, { amount });
         if (!rec.description) rec.description = rec.category;
         if (existing) {
@@ -1323,6 +1347,7 @@
         ${items.length ? '' : '<div class="banner" style="margin:0">' + ICON.warn + '<div>No encontré ningún monto. Probá con algo como “gasté 5 mil en el super”.</div></div>'}
         ${items.map((it, i) => reviewCard(it, i)).join('')}
         ${source === 'ejemplo' ? '<p class="hint" style="margin:0">Así se vería tu movimiento. Tocá el micrófono para cargar uno de verdad.</p><button class="btn" id="r-try">' + 'Probar con mi voz' + '</button>' : ''}`;
+      $$('.split-box', body).forEach(paintSplit);
       $('#r-toggle').onclick = () => { $('#r-edit').hidden = !$('#r-edit').hidden; $('#r-said').hidden = !$('#r-edit').hidden; if (!$('#r-edit').hidden) $('#r-text').focus(); };
       $('#r-reparse').onclick = () => { text = $('#r-text').value.trim(); items = parseText(text); $('#sheet-title').textContent = items.length > 1 ? `Revisar ${items.length} movimientos` : 'Revisar'; draw(); };
       const again = $('#r-again'); if (again) again.onclick = () => openVoice();
@@ -1353,6 +1378,9 @@
     function syncAll() { items.forEach((_, i) => syncItem(i)); }
     function readReview() {
       syncAll();
+      const badSplit = items.findIndex((it) => it.split && it.splitTotal !== 100);
+      if (badSplit >= 0) { toast('El reparto personalizado tiene que sumar 100%'); return null; }
+      items.forEach((it) => delete it.splitTotal);
       const bad = items.findIndex((it) => !(it.amount > 0));
       if (bad >= 0) { toast('Falta el monto de un movimiento'); $(`.review-card[data-i="${bad}"] .rc-amount input`).focus(); return null; }
       return items;
@@ -1374,7 +1402,7 @@
     const recs = items.map((it, k) => ({
       id: uid(), type: it.type, amount: it.amount, currency: it.currency || 'ARS', category: it.category, method: it.method,
       date: it.date, description: it.description || it.category, installments: it.installments || null,
-      jar: it.type === 'gasto' ? it.jar || null : undefined, direct: it.type === 'ingreso' ? it.direct || null : undefined, holdingId: it.type === 'inversion' ? it.holdingId || null : undefined,
+      jar: it.type === 'gasto' ? it.jar || null : undefined, split: it.type === 'ingreso' && it.split && Object.keys(it.split).length ? it.split : undefined, holdingId: it.type === 'inversion' ? it.holdingId || null : undefined,
       cantidad: it.type === 'inversion' ? it.cantidad || null : undefined,
       createdAt: now + k, source: source === 'manual' ? 'texto' : 'voz', transcript: text
     }));
@@ -2064,16 +2092,30 @@
   }
 
   // ---------- Inicio ----------
-  const APP_VERSION = '1.1.1';
+  const APP_VERSION = '1.2.0';
   function init() {
     applyTheme();
     $$('.tab').forEach((t) => (t.onclick = () => go(t.dataset.tab)));
     $('#btn-mic').onclick = () => openVoice();
     $('#btn-add').onclick = () => openEditor(null);
     $('#scrim').onclick = closeSheet;
+    $('#sheet-body').addEventListener('input', (e) => { const box = e.target.closest('.split-box'); if (box) paintSplit(box); });
+    $('#sheet-body').addEventListener('click', (e) => {
+      const box = e.target.closest('.split-box');
+      if (!box) return;
+      if (e.target.closest('.sp-add')) {
+        const used = $$('.sp-jar', box).map((x) => x.value);
+        const next = (jarsOf().find((j) => !used.includes(j.id)) || jarsOf()[0]).id;
+        $('.sp-rows', box).insertAdjacentHTML('beforeend', splitRow(next, ''));
+        paintSplit(box);
+      } else if (e.target.closest('.sp-rm')) {
+        if ($$('.sp-row', box).length > 1) e.target.closest('.sp-row').remove();
+        paintSplit(box);
+      }
+    });
     $('#sheet-body').addEventListener('change', (e) => {
       const sp = (e.target.id || '').match(/^(.*)split$/);
-      if (sp) { const box = $('#' + sp[1] + 'splitbox'); if (box) box.hidden = e.target.value !== 'direct'; return; }
+      if (sp) { const box = $('#' + sp[1] + 'splitbox'); if (box) { box.hidden = e.target.value !== 'custom'; paintSplit(box); } return; }
       const mm = (e.target.id || '').match(/^(.*)cat$/);
       if (!mm) return;
       const jar = $('#' + mm[1] + 'jar');

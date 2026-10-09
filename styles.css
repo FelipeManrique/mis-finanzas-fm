@@ -540,3 +540,10 @@ button.item:active, a.item:active { background: var(--fill); }
 .guide-def b { color: var(--label); }
 
 .split-box { border-top: .5px solid var(--separator); }
+
+.sp-row { gap: 8px; }
+.sp-row .sp-jar { flex: 1; min-width: 0; text-align: left; direction: ltr; color: var(--label); }
+.sp-row .sp-pct { flex: none; width: 4.2em; text-align: right; color: var(--label); }
+.sp-pc { color: var(--label-2); font-size: 15px; }
+.sp-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 12px 10px; }
+.sp-total { font-size: 14px; font-weight: 600; }
