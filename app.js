@@ -460,6 +460,7 @@
     return jarsOf().some((j) => j.id === id) ? id : (jarsOf()[0] || {}).id;
   };
 
+  const planOf = (id, ym) => +((S().jarPlan || {})[ym] || {})[id] || 0;
   function jarsState(ym) {
     const jars = jarsOf();
     const pctJars = jars.filter((j) => !(j.fixed > 0) && !j.actual);
@@ -493,7 +494,10 @@
     const firstFor = (mo) => {
       const inf = info(mo);
       if (inf.deduct) return inf.deduct;
-      const want = fixedJars.map((j) => [j.id, +j.fixed || 0]).concat(actualJars.map((j) => [j.id, inf.actual[j.id] || 0]));
+      // en el mes en curso, lo previsto ("este mes voy a dar…") se separa aunque todavía no lo hayas dado;
+      // cuando el mes termina cuenta sólo lo que registraste
+      const cur = monthOf(todayIso());
+      const want = fixedJars.map((j) => [j.id, +j.fixed || 0]).concat(actualJars.map((j) => [j.id, Math.max(inf.actual[j.id] || 0, mo >= cur ? planOf(j.id, mo) : 0)]));
       let left = inf.ing; const ded = {};
       want.forEach(([id, v]) => { const d = Math.min(v, Math.max(0, left)); ded[id] = d; left -= d; });
       inf.deduct = ded; inf.base = Math.max(0, left);
@@ -625,7 +629,7 @@
       const disp = Math.max(0, s.prev) + s.inM + Math.max(0, s.mvM);
       const pct = disp > 0 ? Math.max(0, Math.min(1, mes / disp)) : 0;
       return `<button class="card jar" data-jar="${esc(j.id)}" style="--j:${esc(j.color)}">
-        <div class="jar-top"><span class="jar-dot"></span><span class="jar-name">${esc(j.name)}</span><span class="jar-pct">${j.actual ? 'lo que des' : j.fixed > 0 ? money(+j.fixed) : String(+j.pct || 0) + '%'}</span></div>
+        <div class="jar-top"><span class="jar-dot"></span><span class="jar-name">${esc(j.name)}</span><span class="jar-pct">${j.actual ? (planOf(j.id, ui.month) && ui.month >= ym ? money(planOf(j.id, ui.month)) + ' previstos' : 'lo que des') : j.fixed > 0 ? money(+j.fixed) : String(+j.pct || 0) + '%'}</span></div>
         <div class="jar-bal num ${mes < 0 ? 'neg' : ''}">${money(Math.round(mes))}</div>
         <div class="bar"><i style="width:${pct * 100}%;background:var(--j)"></i></div>
         <div class="jar-calc num">
@@ -634,10 +638,11 @@
           <span>Usado</span><span>−${money(Math.round(s.outM))}</span>
           ${Math.round(s.mvM) ? `<span>Movido</span><span class="${s.mvM > 0 ? 'pos' : ''}">${money(Math.round(s.mvM), 'ARS', true)}</span>` : ''}
         </div>
+        ${j.actual && ui.month >= ym ? `<div class="jar-hint">${planOf(j.id, ui.month) ? 'Tocá para cambiar lo previsto' : 'Tocá para separar un monto este mes'}</div>` : ''}
       </button>`;
     }).join('')}</div>
       <button class="btn tinted" id="jar-move" style="margin-top:12px">Mover entre frascos</button>
-      <p class="footnote">El número grande es lo disponible del mes: lo que te quedó del mes anterior + lo que entró − lo que usaste ± lo que moviste. Lo que no uses pasa solo al mes siguiente. De lo que cobrás en el mes, Dar recibe exactamente lo que donaste; el resto es el 100% y se reparte con tus porcentajes. </p>`;
+      <p class="footnote">El número grande es lo disponible del mes: lo que te quedó del mes anterior + lo que entró − lo que usaste ± lo que moviste. Lo que no uses pasa solo al mes siguiente. De lo que cobrás en el mes, Dar recibe lo que donaste (o lo que previste dar, si es más: tocá su tarjeta); el resto es el 100% y se reparte con tus porcentajes. </p>`;
     const gm = js.gastos;
     if (esteMes && gm && new Date().getDate() >= 24 && gm.bal > 1000) html += `<div class="banner">${ICON.warn}<div>Te sobran <strong>${money(Math.round(gm.bal))}</strong> en Gastos del mes. Podés dejarlos para el mes que viene o <button id="jar-move-gastos">moverlos a otro frasco</button>.</div></div>`;
     const div = js.diversion;
@@ -717,7 +722,10 @@
 
     el.innerHTML = html;
     paneify(el);
-    $$('[data-jar]', el).forEach((b) => (b.onclick = () => editJars()));
+    $$('[data-jar]', el).forEach((b) => (b.onclick = () => {
+      const j = jarById(b.dataset.jar);
+      if (j && j.actual && ui.month >= ym) planActual(j, ui.month); else editJars();
+    }));
     $('#jar-move').onclick = () => moveJars(null);
     const mg = $('#jar-move-gastos'); if (mg) mg.onclick = () => moveJars('gastos');
     $('#meta-new').onclick = () => editMeta(null);
@@ -799,6 +807,41 @@
         });
         st.jars = jars; st.jarInit = init; st.jarStart = $('#j-start').value || st.jarStart;
         save(); closeSheet(); renderAll(); toast('Frascos guardados');
+      }
+    });
+  }
+
+  // "Este mes voy a dar…": monto previsto para un frasco "lo que des" en un mes
+  function planActual(j, ym) {
+    const st = S();
+    const dado = (jarsState(ym)[j.id] || {}).outM || 0;
+    const prev = planOf(j.id, ym);
+    const mes = esc(monthName(ym).split(' ')[0]);
+    const set = (v) => {
+      st.jarPlan = st.jarPlan || {};
+      const m = Object.assign({}, st.jarPlan[ym]);
+      if (v > 0) m[j.id] = v; else delete m[j.id];
+      if (Object.keys(m).length) st.jarPlan[ym] = m; else delete st.jarPlan[ym];
+      save(); closeSheet(); renderAll();
+    };
+    openSheet({
+      title: j.name + ' en ' + mes, right: 'Guardar',
+      render(body) {
+        body.innerHTML = `<p class="footnote" style="font-size:15px;color:var(--label);margin:0">Si ya sabés cuánto vas a dar en ${mes}, ponelo acá: se separa de lo que cobrás antes de repartir los porcentajes, aunque todavía no lo hayas dado. Si al final das más, cuenta lo que diste; si das menos, cuando termine el mes lo que sobró vuelve al reparto.</p>
+          <div class="field-group">
+            <div class="field"><label for="pl-amt">Este mes voy a dar</label><input id="pl-amt" inputmode="decimal" placeholder="0" autocomplete="off" value="${esc(prev ? amountInputValue(prev) : '')}"></div>
+            <div class="field"><label>Ya diste</label><span class="num" style="color:var(--label-2);margin-left:auto">${money(Math.round(dado))}</span></div>
+          </div>
+          ${prev ? '<button class="link-btn" id="pl-clear" style="justify-self:start;padding:0;color:var(--expense)">Quitar lo previsto</button>' : ''}
+          <button class="link-btn" id="pl-jars" style="justify-self:start;padding:0">Editar frascos y porcentajes</button>`;
+        if ($('#pl-clear')) $('#pl-clear').onclick = () => { set(0); toast('Listo, cuenta sólo lo que des'); };
+        $('#pl-jars').onclick = () => editJars();
+      },
+      onRight() {
+        const raw = $('#pl-amt').value.trim(), v = raw ? parseAmount(raw) : 0;
+        if (raw && !(v >= 0)) { toast('Poné un monto válido'); $('#pl-amt').focus(); return; }
+        set(v);
+        toast(v > 0 ? `Separados ${money(Math.round(v))} para ${j.name} en ${mes}` : 'Listo, cuenta sólo lo que des');
       }
     });
   }
@@ -2257,7 +2300,7 @@
   }
 
   // ---------- Inicio ----------
-  const APP_VERSION = '1.8.0';
+  const APP_VERSION = '1.9.0';
   function init() {
     applyTheme();
     $$('.tab').forEach((t) => (t.onclick = () => go(t.dataset.tab)));
