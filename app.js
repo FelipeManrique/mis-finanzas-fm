@@ -83,6 +83,8 @@
           });
         }
         settings.categories.gasto.forEach((c) => { if (c.name === 'Comida' && c.color === '#FF9F0A') c.color = '#C69214'; });
+        (settings.jars || []).forEach((j) => { if (j.id === 'libertad' && +j.pct === 18.5 && !settings.jarsPct100) j.pct = 20; });
+        settings.jarsPct100 = true;
         if (!settings.categories.gasto.some((c) => c.name === 'Donaciones')) settings.categories.gasto.splice(Math.max(0, settings.categories.gasto.length - 1), 0, clone(Parser.DEFAULT_CATEGORIES.gasto.find((c) => c.name === 'Donaciones')));
         return { movs: Array.isArray(d.movs) ? d.movs : [], settings };
       }
@@ -430,7 +432,7 @@
     { id: 'gastos', name: 'Gastos del mes', pct: 45, color: '#0088FF', hint: 'Tarjeta, cuotas, nafta, comida, compras, salud' },
     { id: 'diversion', name: 'Diversión', pct: 10, color: '#FF8D28', hint: 'Salidas, cenas y gustos. Se gasta sin culpa' },
     { id: 'largo', name: 'Ahorro a largo plazo', pct: 25, color: '#00C8B3', hint: 'Primero el colchón; después mudanza, auto y viaje' },
-    { id: 'libertad', name: 'Libertad financiera', pct: 18.5, color: '#6155F5', hint: 'Inversión: no se toca' },
+    { id: 'libertad', name: 'Libertad financiera', pct: 20, color: '#6155F5', hint: 'Inversión: no se toca' },
     { id: 'dar', name: 'Dar', fixed: 10000, color: '#FF2D55', hint: 'Donaciones y regalos' }
   ]; }
   function DEFAULT_CAT_JAR() { return { 'Salidas': 'diversion', 'Ocio': 'diversion', 'Ropa': 'diversion', 'Educación': 'largo', 'Donaciones': 'dar', 'Regalos': 'dar' }; }
@@ -598,7 +600,7 @@
       </button>`;
     }).join('')}</div>
       <button class="btn tinted" id="jar-move" style="margin-top:12px">Mover entre frascos</button>
-      <p class="footnote">Saldo = anterior (saldo inicial + lo que sobró de meses pasados) + lo que entró este mes − lo que usaste ± lo que moviste. La barra muestra cuánto queda de lo disponible.</p>`;
+      <p class="footnote">Cada cobro: primero los montos fijos (una vez por mes); el resto es el 100% y se reparte con tus porcentajes. Saldo = anterior (saldo inicial + lo que sobró de meses pasados) + lo que entró este mes − lo que usaste ± lo que moviste.</p>`;
     const gm = js.gastos;
     if (gm && new Date().getDate() >= 24 && gm.bal > 1000) html += `<div class="banner">${ICON.warn}<div>Te sobran <strong>${money(Math.round(gm.bal))}</strong> en Gastos del mes. Podés dejarlos para el mes que viene o <button id="jar-move-gastos">moverlos a otro frasco</button>.</div></div>`;
     const div = js.diversion;
@@ -708,7 +710,7 @@
     openSheet({
       title: 'Mis frascos', right: 'Guardar',
       render(body) {
-        body.innerHTML = `<p class="footnote" style="font-size:15px;color:var(--label);margin:0">Porcentaje de cada cobro, o un monto fijo por mes (se descuenta del primer cobro del mes). Los porcentajes se reparten sobre lo que queda.</p>
+        body.innerHTML = `<p class="footnote" style="font-size:15px;color:var(--label);margin:0">Primero se separan los montos fijos (una vez por mes, del primer cobro). Lo que queda es el 100%, y sobre eso se aplican los porcentajes: tienen que sumar 100%.</p>
           ${jars.map((j, i) => `<div class="field-group jar-ed" style="--j:${esc(j.color)}">
             <button type="button" class="jar-ed-head" aria-expanded="false" aria-controls="j-b${i}"><span class="jar-dot"></span><span class="grow"><span id="j-h${i}">${esc(j.name)}</span><small class="jar-ed-ini num" id="j-ini${i}">${+(st.jarInit || {})[j.id] ? 'Saldo inicial ' + money(+st.jarInit[j.id]) : ''}</small></span>
               <span class="jar-ed-sum num" id="j-s${i}">${j.fixed > 0 ? money(+j.fixed) : String(+j.pct || 0).replace('.', ',') + '%'}</span>
@@ -737,12 +739,16 @@
             $('#j-ini' + i).textContent = ini ? 'Saldo inicial ' + money(ini) : '';
           });
           let t = 0; jars.forEach((_, i) => { if ($('#j-t' + i).value === 'pct') t += parseFloat(($('#j-v' + i).value || '0').replace(',', '.')) || 0; });
-          $('#j-sum').textContent = String(Math.round(t * 10) / 10).replace('.', ',') + '%' + (Math.abs(t - 100) > 0.05 ? ' (se reparte en proporción)' : '');
+          const ok = Math.abs(t - 100) <= 0.05;
+          $('#j-sum').textContent = String(Math.round(t * 10) / 10).replace('.', ',') + '%' + (ok ? ' ✓' : t < 100 ? ` · falta ${String(Math.round((100 - t) * 10) / 10).replace('.', ',')}%` : ` · sobra ${String(Math.round((t - 100) * 10) / 10).replace('.', ',')}%`);
+          $('#j-sum').style.color = ok ? 'var(--income)' : 'var(--warn)';
         };
         jars.forEach((_, i) => { $('#j-v' + i).oninput = upd; $('#j-t' + i).onchange = upd; $('#j-n' + i).oninput = upd; $('#j-i' + i).oninput = upd; });
         upd();
       },
       onRight() {
+        let tot = 0; jars.forEach((_, i) => { if ($('#j-t' + i).value === 'pct') tot += parseFloat(($('#j-v' + i).value || '0').replace(',', '.')) || 0; });
+        if (Math.abs(tot - 100) > 0.05) { toast(`Los porcentajes tienen que sumar 100% (van ${String(Math.round(tot * 10) / 10).replace('.', ',')}%)`); return; }
         const init = {};
         jars.forEach((j, i) => {
           j.name = $('#j-n' + i).value.trim() || j.name;
@@ -2210,7 +2216,7 @@
   }
 
   // ---------- Inicio ----------
-  const APP_VERSION = '1.5.0';
+  const APP_VERSION = '1.5.1';
   function init() {
     applyTheme();
     $$('.tab').forEach((t) => (t.onclick = () => go(t.dataset.tab)));
