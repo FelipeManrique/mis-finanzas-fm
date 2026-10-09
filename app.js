@@ -244,7 +244,7 @@
         <div class="out"><span class="caption">Gastos</span><span class="v num">${money(Math.round(gas))}</span></div>
       </div>
       ${inv ? `<div class="usd-line num">Invertido este mes: <strong style="color:var(--inv)">${money(Math.round(inv))}</strong></div>` : ''}
-      <button class="jar-strip" id="jar-strip">${jarsOf().filter((j) => j.id === 'gastos' || j.id === 'diversion').map((j) => `<span style="--j:${esc(j.color)}"><span class="jar-dot"></span>${esc(j.name)} <strong class="num">${money(Math.round(((js[j.id] || {}).inM || 0) - ((js[j.id] || {}).outM || 0) + ((js[j.id] || {}).mvM || 0)))}</strong></span>`).join('')}${ICON.right}</button>`;
+      <button class="jar-strip" id="jar-strip">${jarsOf().filter((j) => j.id === 'gastos' || j.id === 'diversion').map((j) => `<span style="--j:${esc(j.color)}"><span class="jar-dot"></span>${esc(j.name)} <strong class="num">${money(Math.round((js[j.id] || {}).bal || 0))}</strong></span>`).join('')}${ICON.right}</button>`;
     if (t.USD.in || t.USD.out) html += `<div class="usd-line num">Dólares: ingresos ${money(t.USD.in, 'USD')} · salidas ${money(t.USD.out, 'USD')}</div>`;
     $('#summary').innerHTML = html;
     $('#jar-strip').onclick = () => go('accounts');
@@ -608,24 +608,24 @@
     // Frascos
     let html = `<h2 class="section-title" style="margin-top:8px">Mis frascos${esteMes ? '' : ' en ' + esc(monthName(ui.month).split(' ')[0])}</h2><div class="jars">${jarsOf().map((j) => {
       const s = js[j.id] || { bal: 0, prev: 0, inM: 0, outM: 0, mvM: 0 };
-      // vista mensual: lo que entró este mes − lo usado ± lo movido
-      const mes = s.inM - s.outM + s.mvM;
-      const disp = s.inM + Math.max(0, s.mvM);
+      // disponible del mes: lo que venía del mes anterior + lo que entró − lo usado ± lo movido
+      const mes = s.bal;
+      const disp = Math.max(0, s.prev) + s.inM + Math.max(0, s.mvM);
       const pct = disp > 0 ? Math.max(0, Math.min(1, mes / disp)) : 0;
       return `<button class="card jar" data-jar="${esc(j.id)}" style="--j:${esc(j.color)}">
         <div class="jar-top"><span class="jar-dot"></span><span class="jar-name">${esc(j.name)}</span><span class="jar-pct">${j.actual ? 'lo que des' : j.fixed > 0 ? money(+j.fixed) : String(+j.pct || 0).replace('.', ',') + '%'}</span></div>
         <div class="jar-bal num ${mes < 0 ? 'neg' : ''}">${money(Math.round(mes))}</div>
         <div class="bar"><i style="width:${pct * 100}%;background:var(--j)"></i></div>
         <div class="jar-calc num">
+          <span>${monthOf(S().jarStart || '') === ui.month ? 'Inicial' : 'Anterior'}</span><span class="${s.prev < 0 ? 'neg' : ''}">${money(Math.round(s.prev))}</span>
           <span>Entró</span><span class="pos">+${money(Math.round(s.inM))}</span>
           <span>Usado</span><span>−${money(Math.round(s.outM))}</span>
           ${Math.round(s.mvM) ? `<span>Movido</span><span class="${s.mvM > 0 ? 'pos' : ''}">${money(Math.round(s.mvM), 'ARS', true)}</span>` : ''}
         </div>
-        <div class="jar-acc num"><span>Acumulado</span><span class="${s.bal < 0 ? 'neg' : ''}">${money(Math.round(s.bal))}</span></div>
       </button>`;
     }).join('')}</div>
       <button class="btn tinted" id="jar-move" style="margin-top:12px">Mover entre frascos</button>
-      <p class="footnote">El número grande es lo disponible del mes: lo que entró − lo que usaste ± lo que moviste. "Acumulado" suma además lo que traías de meses anteriores. De lo que cobrás en el mes, Dar recibe exactamente lo que donaste; el resto es el 100% y se reparte con tus porcentajes. </p>`;
+      <p class="footnote">El número grande es lo disponible del mes: lo que te quedó del mes anterior + lo que entró − lo que usaste ± lo que moviste. Lo que no uses pasa solo al mes siguiente. De lo que cobrás en el mes, Dar recibe exactamente lo que donaste; el resto es el 100% y se reparte con tus porcentajes. </p>`;
     const gm = js.gastos;
     if (esteMes && gm && new Date().getDate() >= 24 && gm.bal > 1000) html += `<div class="banner">${ICON.warn}<div>Te sobran <strong>${money(Math.round(gm.bal))}</strong> en Gastos del mes. Podés dejarlos para el mes que viene o <button id="jar-move-gastos">moverlos a otro frasco</button>.</div></div>`;
     const div = js.diversion;
@@ -2245,7 +2245,7 @@
   }
 
   // ---------- Inicio ----------
-  const APP_VERSION = '1.7.0';
+  const APP_VERSION = '1.7.1';
   function init() {
     applyTheme();
     $$('.tab').forEach((t) => (t.onclick = () => go(t.dataset.tab)));
