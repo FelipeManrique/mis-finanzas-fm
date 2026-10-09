@@ -140,6 +140,13 @@
     const v = Parser.parseDigits(s);
     return v === null ? NaN : v;
   }
+  // Cantidades (BTC, acciones): un solo punto es decimal ("0.0025"); con coma, la coma es el decimal.
+  function parseQty(s) {
+    s = String(s || '').replace(/[^\d.,]/g, '');
+    if (!s) return NaN;
+    if (s.includes(',')) return parseFloat(s.replace(/\./g, '').replace(',', '.'));
+    return parseFloat((s.match(/\./g) || []).length > 1 ? s.replace(/\./g, '') : s);
+  }
   function amountInputValue(v) {
     if (!v && v !== 0) return '';
     return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(v);
@@ -925,7 +932,7 @@
         const read = () => {
           x.nombre = $('#h-n').value.trim();
           if ($('#h-s')) x.simbolo = $('#h-s').value.trim().toUpperCase();
-          if ($('#h-q')) x.cantidad = parseFloat(($('#h-q').value || '0').replace(/\./g, '').replace(',', '.')) || parseFloat($('#h-q').value) || 0;
+          if ($('#h-q')) x.cantidad = parseQty($('#h-q').value) || 0;
           if ($('#h-v')) x.valorManual = parseAmount($('#h-v').value) || 0;
           x.aporteInicial = parseAmount($('#h-a').value) || 0;
           x.clase = $('#h-c').value;
@@ -1263,7 +1270,7 @@
       }
     }
     if (opt('jar') !== undefined) { const def = (S().catJar || {})[out.category] || 'gastos'; out.jar = opt('jar') !== def ? opt('jar') : null; }
-    if (opt('hold') !== undefined) { out.holdingId = opt('hold') || null; const q = (opt('qty') || '').trim(); out.cantidad = q ? parseFloat(q.replace(/\./g, '').replace(',', '.')) || parseFloat(q) || null : null; }
+    if (opt('hold') !== undefined) { out.holdingId = opt('hold') || null; const q = (opt('qty') || '').trim(); out.cantidad = q ? parseQty(q) || null : null; }
     return out;
   }
   function refillCats(select, type, keep) {
@@ -2245,7 +2252,7 @@
   }
 
   // ---------- Inicio ----------
-  const APP_VERSION = '1.7.1';
+  const APP_VERSION = '1.7.2';
   function init() {
     applyTheme();
     $$('.tab').forEach((t) => (t.onclick = () => go(t.dataset.tab)));

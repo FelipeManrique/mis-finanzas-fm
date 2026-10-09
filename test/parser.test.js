@@ -25,6 +25,8 @@ check('Gasté 5000 pesos en el supermercado con débito', { amount: 5000, type: 
 check('gasté $12.500 en nafta', { amount: 12500, category: 'Auto' });
 check('pagué 1,5 millones de alquiler', { amount: 1500000, category: 'Vivienda' });
 check('pagué 2.350,50 en la farmacia', { amount: 2350.5, category: 'Salud' });
+check('gasté 1500.50 en la farmacia', { amount: 1500.5, category: 'Salud' });
+check('gasté 12.5 en el kiosco', { amount: 12.5 });
 check('15 mil en el super', { amount: 15000, category: 'Supermercado', type: 'gasto' });
 check('compré zapatillas 85k con crédito en 3 cuotas', { amount: 85000, category: 'Ropa', method: 'Crédito', installments: 3 });
 check('35 lucas de luz', { amount: 35000, category: 'Servicios' });

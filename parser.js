@@ -34,7 +34,8 @@
     const sep = dots ? '.' : commas ? ',' : null;
     if (!sep) return parseInt(t, 10);
     const parts = t.split(sep);
-    if (parts.length > 2 || parts[parts.length - 1].length === 3) return parseInt(parts.join(''), 10);
+    // "1.500" = mil quinientos; "0.005", "12.5" o "1500.50" = decimales
+    if (parts.length > 2 || (parts[1].length === 3 && parts[0] !== '0')) return parseInt(parts.join(''), 10);
     return parseFloat(parts.join('.'));
   }
 
