@@ -256,7 +256,7 @@
     const c = catInfo(m.type, m.category);
     const hold = m.type === 'inversion' && m.holdingId ? (S().holdings || []).find((x) => x.id === m.holdingId) : null;
     const jar = m.type === 'gasto' ? jarById(jarOfMov(m)) : null;
-    const sub = [m.category, m.type === 'ingreso' && m.split ? 'Reparto propio' : null, jar ? jar.name : null, hold ? hold.nombre : null, m.method, m.installments ? m.installments + ' cuotas' : null].filter(Boolean).join(' · ');
+    const sub = [m.category, m.type === 'ingreso' && m.direct ? `${String(m.direct.pct).replace('.', ',')}% a ${jarById(m.direct.jar).name}` : null, jar ? jar.name : null, hold ? hold.nombre : null, m.method, m.installments ? m.installments + ' cuotas' : null].filter(Boolean).join(' · ');
     return `<button class="row" data-id="${esc(m.id)}">
       <span class="badge" style="--c:${esc(c.color)}" aria-hidden="true">${esc((m.category || '?').charAt(0).toUpperCase())}</span>
       <span class="mid"><span class="t">${esc(m.description || m.category)}</span>
@@ -425,11 +425,13 @@
     const fixedDone = new Set();
     const put = (id, v, m) => { if (!st[id]) return; st[id].bal += v; if (monthOf(m.date) === ym) v >= 0 ? (st[id].inM += v) : (st[id].outM -= v); };
     for (const m of movs) {
-      if (m.type === 'ingreso' && m.split && Object.keys(m.split).length) {
-        const tot = Object.values(m.split).reduce((a, b) => a + (+b || 0), 0) || 1;
-        Object.entries(m.split).forEach(([id, p]) => put(id, m.amount * (+p || 0) / tot, m));
-      } else if (m.type === 'ingreso') {
+      if (m.type === 'ingreso') {
         let rest = m.amount;
+        // una parte directo a un frasco (ej. 75% a libertad financiera); el resto se reparte como cualquier cobro
+        if (m.direct && m.direct.jar && st[m.direct.jar] && +m.direct.pct > 0) {
+          const d = m.amount * Math.min(100, +m.direct.pct) / 100;
+          put(m.direct.jar, d, m); rest -= d;
+        }
         const mo = monthOf(m.date);
         if (!fixedDone.has(mo)) {
           fixedDone.add(mo);
@@ -1053,10 +1055,12 @@
     const sel = (id, label, opts, val) => `<div class="field"><label for="${prefix}${id}">${label}</label><select id="${prefix}${id}">${opts.map(([k, v]) => `<option value="${esc(k)}" ${k === val ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select></div>`;
     if (m.type === 'gasto') return sel('jar', 'Frasco', jarsOf().map((j) => [j.id, j.name]), jarOfMov(m));
     if (m.type === 'ingreso') {
-      const custom = m.split && Object.keys(m.split).length;
-      return sel('split', 'Reparto', [['normal', 'Normal (mis frascos)'], ['custom', 'Personalizado']], custom ? 'custom' : 'normal') +
-        `<div class="split-box" id="${prefix}splitbox" ${custom ? '' : 'hidden'}>${jarsOf().map((j) => `<div class="field"><label for="${prefix}sp-${esc(j.id)}">${esc(j.name)} %</label><input id="${prefix}sp-${esc(j.id)}" inputmode="decimal" placeholder="0" value="${custom && m.split[j.id] ? String(m.split[j.id]).replace('.', ',') : ''}"></div>`).join('')}
-        <p class="footnote" style="margin:0 16px 10px">Para ingresos extraordinarios: este cobro se reparte sólo así y no paga los montos fijos.</p></div>`;
+      const on = !!(m.direct && +m.direct.pct > 0);
+      return sel('split', 'Reparto', [['normal', 'Normal (mis frascos)'], ['direct', 'Una parte directo a un frasco']], on ? 'direct' : 'normal') +
+        `<div class="split-box" id="${prefix}splitbox" ${on ? '' : 'hidden'}>
+          <div class="field"><label for="${prefix}dpct">Porcentaje</label><input id="${prefix}dpct" inputmode="decimal" placeholder="Ej: 75" value="${on ? String(m.direct.pct).replace('.', ',') : ''}"></div>
+          ${sel('djar', 'Va a', jarsOf().map((j) => [j.id, j.name]), on ? m.direct.jar : 'libertad')}
+          <p class="footnote" style="margin:0 16px 10px">Ese porcentaje va entero a ese frasco; el resto del cobro se reparte como siempre.</p></div>`;
     }
     if (m.type === 'inversion') return sel('hold', 'Activo', [['', 'Sin asignar']].concat((S().holdings || []).map((h) => [h.id, h.nombre])), m.holdingId || '') +
       `<div class="field"><label for="${prefix}qty">Cantidad comprada</label><input id="${prefix}qty" inputmode="decimal" placeholder="opcional" value="${m.cantidad ? String(m.cantidad).replace('.', ',') : ''}"></div>`;
@@ -1079,12 +1083,9 @@
     const inst = parseInt(v('inst'), 10);
     const out = { description: v('desc').trim(), category: v('cat'), method: v('method'), date: v('date') || todayIso(), installments: inst > 1 ? inst : null };
     if (opt('split') !== undefined) {
-      out.split = null;
-      if (opt('split') === 'custom') {
-        const sp = {};
-        jarsOf().forEach((j) => { const v = parseFloat((opt('sp-' + j.id) || '').replace(',', '.')); if (v > 0) sp[j.id] = v; });
-        if (Object.keys(sp).length) out.split = sp;
-      }
+      out.direct = null;
+      const pct = parseFloat((opt('dpct') || '').replace(',', '.'));
+      if (opt('split') === 'direct' && pct > 0) out.direct = { jar: opt('djar'), pct: Math.min(100, pct) };
     }
     if (opt('jar') !== undefined) { const def = (S().catJar || {})[out.category] || 'gastos'; out.jar = opt('jar') !== def ? opt('jar') : null; }
     if (opt('hold') !== undefined) { out.holdingId = opt('hold') || null; const q = (opt('qty') || '').trim(); out.cantidad = q ? parseFloat(q.replace(/\./g, '').replace(',', '.')) || parseFloat(q) || null : null; }
@@ -1373,7 +1374,7 @@
     const recs = items.map((it, k) => ({
       id: uid(), type: it.type, amount: it.amount, currency: it.currency || 'ARS', category: it.category, method: it.method,
       date: it.date, description: it.description || it.category, installments: it.installments || null,
-      jar: it.type === 'gasto' ? it.jar || null : undefined, split: it.type === 'ingreso' ? it.split || null : undefined, holdingId: it.type === 'inversion' ? it.holdingId || null : undefined,
+      jar: it.type === 'gasto' ? it.jar || null : undefined, direct: it.type === 'ingreso' ? it.direct || null : undefined, holdingId: it.type === 'inversion' ? it.holdingId || null : undefined,
       cantidad: it.type === 'inversion' ? it.cantidad || null : undefined,
       createdAt: now + k, source: source === 'manual' ? 'texto' : 'voz', transcript: text
     }));
@@ -2063,7 +2064,7 @@
   }
 
   // ---------- Inicio ----------
-  const APP_VERSION = '1.1.0';
+  const APP_VERSION = '1.1.1';
   function init() {
     applyTheme();
     $$('.tab').forEach((t) => (t.onclick = () => go(t.dataset.tab)));
@@ -2072,7 +2073,7 @@
     $('#scrim').onclick = closeSheet;
     $('#sheet-body').addEventListener('change', (e) => {
       const sp = (e.target.id || '').match(/^(.*)split$/);
-      if (sp) { const box = $('#' + sp[1] + 'splitbox'); if (box) box.hidden = e.target.value !== 'custom'; return; }
+      if (sp) { const box = $('#' + sp[1] + 'splitbox'); if (box) box.hidden = e.target.value !== 'direct'; return; }
       const mm = (e.target.id || '').match(/^(.*)cat$/);
       if (!mm) return;
       const jar = $('#' + mm[1] + 'jar');
