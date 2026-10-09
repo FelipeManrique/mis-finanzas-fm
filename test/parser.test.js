@@ -30,7 +30,7 @@ check('compré zapatillas 85k con crédito en 3 cuotas', { amount: 85000, catego
 check('35 lucas de luz', { amount: 35000, category: 'Servicios' });
 check('pagué 5,500 de internet', { amount: 5500, category: 'Servicios' });
 // palabras
-check('gasté cinco mil quinientos pesos en un café', { amount: 5500, category: 'Comida y salidas' });
+check('gasté cinco mil quinientos pesos en un café', { amount: 5500, category: 'Salidas' });
 check('pagué doscientos cincuenta mil de expensas', { amount: 250000, category: 'Vivienda' });
 check('cobré dos millones trescientos mil de sueldo', { amount: 2300000, type: 'ingreso', category: 'Sueldo' });
 check('treinta y cinco mil en la verdulería', { amount: 35000, category: 'Supermercado' });
@@ -45,7 +45,7 @@ check('vendí la bici en 300 mil', { amount: 300000, type: 'ingreso', category: 
 check('ayer gasté 3000 en el kiosco', { amount: 3000, date: '2026-10-06' });
 check('anteayer pagué 20000 de gas', { amount: 20000, date: '2026-10-05', category: 'Servicios' });
 check('el 3 de octubre pagué 45000 de luz', { amount: 45000, date: '2026-10-03' });
-check('el lunes gasté 7000 en pizza', { amount: 7000, date: '2026-10-05', category: 'Comida y salidas' });
+check('el lunes gasté 7000 en pizza', { amount: 7000, date: '2026-10-05', category: 'Comida' });
 check('hace 3 días pagué 4000 de estacionamiento', { amount: 4000, date: '2026-10-04', category: 'Transporte' });
 check('el día 2 cobré 100000 de honorarios', { amount: 100000, date: '2026-10-02', type: 'ingreso' });
 // medios
@@ -56,7 +56,7 @@ check('gasté 4500 en efectivo en el colectivo', { method: 'Efectivo', category:
 check('cobré 500 dólares de un proyecto', { amount: 500, currency: 'USD', type: 'ingreso' });
 check('gasté 20 usd en spotify', { amount: 20, currency: 'USD', category: 'Suscripciones' });
 // varios movimientos
-check('gasté 2000 en café y 15000 en nafta', { count: 2, items: [{ amount: 2000, category: 'Comida y salidas' }, { amount: 15000, category: 'Auto', type: 'gasto' }] });
+check('gasté 2000 en café y 15000 en nafta', { count: 2, items: [{ amount: 2000, category: 'Salidas' }, { amount: 15000, category: 'Auto', type: 'gasto' }] });
 check('pagué 30000 de luz, 25000 de gas y 18000 de internet', { count: 3, items: [{ amount: 30000 }, { amount: 25000, category: 'Servicios' }, { amount: 18000, category: 'Servicios' }] });
 check('cobré 900000 de sueldo y después gasté 60000 en el super', { count: 2, items: [{ type: 'ingreso', amount: 900000 }, { type: 'gasto', amount: 60000, category: 'Supermercado' }] });
 check('compré 2 cafés por 6000', { count: 1, amount: 6000 });
@@ -70,7 +70,7 @@ check('pagué la cuota del gimnasio 25000', { amount: 25000, category: 'Salud' }
 check('5 mil 500 de verdura', { amount: 5500, category: 'Supermercado' });
 check('mil pesos de pan', { amount: 1000, category: 'Supermercado' });
 check('gasté mil quinientos en el kiosco', { amount: 1500 });
-check('Gasté $5.000 en pedidos ya', { amount: 5000, category: 'Comida y salidas' });
+check('Gasté $5.000 en pedidos ya', { amount: 5000, category: 'Comida' });
 check('gasté 5000 en 2 pizzas', { count: 1, amount: 5000 });
 check('el 15 de septiembre gasté 9000 en ropa', { date: '2026-09-15', amount: 9000, category: 'Ropa' });
 check('el 20 de octubre pagué 9000', { date: '2025-10-20' });
@@ -90,6 +90,13 @@ check('cobré 360 mil de sueldo e invertí 50 mil en bitcoin', { count: 2, items
 
 check('cobré la pensión 355 mil', { type: 'ingreso', category: 'Pensión' });
 check('pagué la tarjeta 169 mil', { type: 'gasto', category: 'Resumen de tarjeta', amount: 169000 });
+
+// comida (gastos) vs salidas (diversión)
+check('gasté 25 mil en comida con amigos', { category: 'Salidas' });
+check('gasté 30 mil en una cena con mi novia', { category: 'Salidas' });
+check('compré comida para la casa de mi novia 18 mil', { category: 'Comida' });
+check('gasté 12 mil en comida para mi casa', { category: 'Comida' });
+check('salimos a tomar unas birras 15 mil', { category: 'Salidas' });
 
 console.log(`\n${pass} ok, ${fail} con error`);
 process.exit(fail ? 1 : 0);

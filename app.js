@@ -70,6 +70,17 @@
         // colchón acordado: 6 meses de un gasto estimado de $283.333 (= $1.700.000), punto medio entre $200.000 y $370.000
         if (!settings.gastoEstimadoEditado && [370000, 200000].includes(+settings.gastoEstimado)) settings.gastoEstimado = 1700000 / 6;
         if (!settings.colchonEditado && +settings.colchonManual === 1700000) settings.colchonManual = 0;
+        const iCS = settings.categories.gasto.findIndex((c) => c.name === 'Comida y salidas');
+        if (iCS >= 0) {
+          const def = (n) => clone(Parser.DEFAULT_CATEGORIES.gasto.find((c) => c.name === n));
+          settings.categories.gasto.splice(iCS, 1, def('Comida'), def('Salidas'));
+          if (settings.catJar) { delete settings.catJar['Comida y salidas']; settings.catJar['Salidas'] = 'diversion'; }
+          (d.movs || []).forEach((m) => {
+            if (m.category !== 'Comida y salidas') return;
+            const t = Parser.norm([m.description, m.transcript].join(' '));
+            m.category = Parser.detectCategory(t, 'gasto', { gasto: [def('Salidas'), def('Comida')] }) === 'Salidas' ? 'Salidas' : 'Comida';
+          });
+        }
         if (!settings.categories.gasto.some((c) => c.name === 'Donaciones')) settings.categories.gasto.splice(Math.max(0, settings.categories.gasto.length - 1), 0, clone(Parser.DEFAULT_CATEGORIES.gasto.find((c) => c.name === 'Donaciones')));
         return { movs: Array.isArray(d.movs) ? d.movs : [], settings };
       }
@@ -408,7 +419,7 @@
     { id: 'libertad', name: 'Libertad financiera', pct: 18.5, color: '#6155F5', hint: 'Inversión: no se toca' },
     { id: 'dar', name: 'Dar', fixed: 10000, color: '#FF2D55', hint: 'Donaciones y regalos' }
   ]; }
-  function DEFAULT_CAT_JAR() { return { 'Comida y salidas': 'diversion', 'Ocio': 'diversion', 'Ropa': 'diversion', 'Educación': 'largo', 'Donaciones': 'dar', 'Regalos': 'dar' }; }
+  function DEFAULT_CAT_JAR() { return { 'Salidas': 'diversion', 'Ocio': 'diversion', 'Ropa': 'diversion', 'Educación': 'largo', 'Donaciones': 'dar', 'Regalos': 'dar' }; }
   const jarsOf = () => S().jars || [];
   const jarById = (id) => jarsOf().find((j) => j.id === id) || jarsOf()[0];
   const jarOfMov = (m) => {
@@ -2105,7 +2116,7 @@
   }
 
   // ---------- Inicio ----------
-  const APP_VERSION = '1.2.4';
+  const APP_VERSION = '1.3.0';
   function init() {
     applyTheme();
     $$('.tab').forEach((t) => (t.onclick = () => go(t.dataset.tab)));
