@@ -1,0 +1,51 @@
+{
+  "name": "Mis Finanzas FM",
+  "short_name": "Finanzas FM",
+  "description": "6 frascos, cartera de inversiones, metas y cuotas, por voz.",
+  "lang": "es-AR",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#4B3BD6",
+  "theme_color": "#4B3BD6",
+  "icons": [
+    {
+      "src": "https://felipemanrique.github.io/mis-finanzas-fm/icons/icon-180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://felipemanrique.github.io/mis-finanzas-fm/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://felipemanrique.github.io/mis-finanzas-fm/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://felipemanrique.github.io/mis-finanzas-fm/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Cargar con la voz",
+      "url": "./?voz=1",
+      "icons": [
+        {
+          "src": "https://felipemanrique.github.io/mis-finanzas-fm/icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ],
+  "id": "/mis-finanzas-fm/"
+}
