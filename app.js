@@ -46,7 +46,7 @@
     jarInit: {},
     jarStart: monthOf(todayIso()) + '-01',
     colchonMeses: 6,
-    colchonManual: 0,
+    colchonManual: 1700000,
     gastoEstimado: 200000,
     metas: [{ id: 'm-mudanza', nombre: 'Mudarme', monto: 0 }, { id: 'm-auto', nombre: 'Auto', monto: 0 }, { id: 'm-viaje', nombre: 'Viaje', monto: 0 }],
     holdings: [],
@@ -68,6 +68,8 @@
         ['gasto', 'ingreso', 'inversion'].forEach((t) => { if (!Array.isArray(settings.categories[t])) settings.categories[t] = clone(Parser.DEFAULT_CATEGORIES[t]); });
         [['gasto', 'Resumen de tarjeta'], ['ingreso', 'Pensión']].forEach(([t, n]) => { if (!settings.categories[t].some((c) => c.name === n)) settings.categories[t].splice(Math.max(0, settings.categories[t].length - 1), 0, clone(Parser.DEFAULT_CATEGORIES[t].find((c) => c.name === n))); });
         if (+settings.gastoEstimado === 370000 && !settings.gastoEstimadoEditado) settings.gastoEstimado = 200000;
+        // colchón acordado: $1.700.000 fijo (punto medio entre gastos habituales y meses con arreglos)
+        if (!settings.colchonEditado && !+settings.colchonManual) settings.colchonManual = 1700000;
         if (!settings.categories.gasto.some((c) => c.name === 'Donaciones')) settings.categories.gasto.splice(Math.max(0, settings.categories.gasto.length - 1), 0, clone(Parser.DEFAULT_CATEGORIES.gasto.find((c) => c.name === 'Donaciones')));
         return { movs: Array.isArray(d.movs) ? d.movs : [], settings };
       }
@@ -469,7 +471,7 @@
     const avg = g.value;
     const target = Math.round((+S().colchonManual || avg * meses) / 1000) * 1000;
     let avail = Math.max(0, largoBal);
-    const colchon = { nombre: `Colchón de emergencia (${meses} meses)`, monto: target, tiene: Math.min(avail, target), auto: !S().colchonManual, avg, real: g.real };
+    const colchon = { nombre: +S().colchonManual ? 'Colchón de emergencia' : `Colchón de emergencia (${meses} meses)`, monto: target, tiene: Math.min(avail, target), auto: !S().colchonManual, avg, real: g.real };
     avail -= colchon.tiene;
     const metas = (S().metas || []).map((mt) => { const tiene = Math.min(avail, +mt.monto || 0); avail -= tiene; return Object.assign({}, mt, { tiene }); });
     return { colchon, metas, sobrante: avail, fase: colchon.monto > 0 && colchon.tiene < colchon.monto ? 1 : 2 };
@@ -723,6 +725,7 @@
         st.colchonManual = parseAmount($('#co-x').value) || 0;
         st.gastoEstimado = parseAmount($('#co-e').value) || 0;
         st.gastoEstimadoEditado = true;
+        st.colchonEditado = true;
         save(); closeSheet(); renderAll(); toast('Colchón actualizado');
       }
     });
@@ -2102,7 +2105,7 @@
   }
 
   // ---------- Inicio ----------
-  const APP_VERSION = '1.2.2';
+  const APP_VERSION = '1.2.3';
   function init() {
     applyTheme();
     $$('.tab').forEach((t) => (t.onclick = () => go(t.dataset.tab)));
